@@ -1,6 +1,10 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const CLAUDE_MD_TEMPLATE = `# Zootropolis Agent — {agentId}
 
@@ -9,6 +13,13 @@ on disk that is your entire world: your Claude session cache, your workspace,
 your durable memory.md notebook, your AliasKit identity (identity.json), and
 any installed Claude skills under skills/.
 
+## Read this skill first
+
+\`skills/zootropolis-paperclip.md\` is the protocol manual: the wake-payload
+shape, how you close issues (the JSON close marker on your last stdout line),
+how the delegation rule works, and what each file in your folder is for.
+Re-read it at the start of each task.
+
 ## Delegation rules (non-negotiable)
 
 You report to exactly ONE manager: the agent named in your reportsTo field
@@ -16,12 +27,19 @@ You report to exactly ONE manager: the agent named in your reportsTo field
 - Create issues for anyone other than your manager.
 - Accept work from anyone other than your manager.
 
-If you finish a task, write your output into the closing comment of the issue
-you were assigned. Do not write deliverables to loose files in workspace/ —
-the issue's closing comment is the canonical artifact (see Zootropolis
-design.md §4: "Issues are the artifact store"). You may use workspace/ for
-intermediate scratch and link to specific paths/SHAs in your closing comment
-when content is too large to inline.
+## How you complete a task
+
+Emit a JSON object as your LAST line of stdout:
+
+  {"zootropolis":{"action":"close","status":"done","summary":"<one line>","artifact":"<full markdown>"}}
+
+The artifact becomes the closing comment on your assigned issue and the
+issue transitions to status="done". Without this marker, your stdout-tail
+becomes a comment but the issue stays open. Full spec is in the skill file.
+
+Do not write deliverables to loose files in workspace/ — the issue's
+closing comment is the canonical artifact (Zootropolis design.md §4:
+"Issues are the artifact store"). workspace/ is for intermediate scratch.
 
 ## Your durable memory
 
@@ -33,9 +51,9 @@ notes ("I've been working on X"; "I learned Y"). Claude's session cache
 
 The wake payload (delivered on stdin as JSON) tells you:
 - runId: this heartbeat's id
-- The current issue assigned to you (title, description, status, prior comments)
+- The current issue assigned to you (title, status, priority, prior comments)
 
-Read it, do the work, write the result, exit.
+Read it, do the work, emit the close marker, exit.
 `;
 
 const MEMORY_MD_TEMPLATE = `# {agentId} — durable memory
@@ -85,5 +103,34 @@ export async function ensureFolderBootstrapped(folder: string, agentId: string):
     writeFile(join(folder, "identity.json"), JSON.stringify(DEFAULT_IDENTITY, null, 2) + "\n", {
       flag: "wx",
     }).catch(() => {}),
+    copyZootropolisPaperclipSkill(folder).catch(() => {}),
   ]);
+}
+
+/**
+ * Copy the bundled Zootropolis Paperclip skill into the agent's
+ * skills/ directory. Defines the close-marker convention (matched
+ * server-side by readZootropolisCloseMarker in @paperclipai/shared)
+ * and the delegation contract.
+ *
+ * Resolves the source path relative to this module so it works in both
+ * dev (tsx, source layout) and prod (compiled dist/ layout). When run
+ * from dist/, the skill source lives one level up.
+ */
+async function copyZootropolisPaperclipSkill(folder: string): Promise<void> {
+  const candidates = [
+    // dev: __dirname = packages/agent-runtime/src/, skill is in src/skills/
+    join(__dirname, "skills", "zootropolis-paperclip.md"),
+    // prod: __dirname = packages/agent-runtime/dist/, skill copied alongside
+    join(__dirname, "..", "src", "skills", "zootropolis-paperclip.md"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      const contents = await readFile(candidate, "utf8");
+      await writeFile(join(folder, "skills", "zootropolis-paperclip.md"), contents, {
+        flag: "wx",
+      });
+      return;
+    }
+  }
 }

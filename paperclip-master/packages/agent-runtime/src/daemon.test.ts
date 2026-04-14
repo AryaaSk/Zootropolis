@@ -90,6 +90,14 @@ describe("agent-runtime daemon", () => {
     expect(memoryMd).toContain("test-agent");
     const identity = JSON.parse(await readFile(join(folder, "identity.json"), "utf8"));
     expect(identity).toHaveProperty("note");
+    // Phase D2: the Zootropolis Paperclip skill should be copied into
+    // skills/ on first execute, defining the close-marker contract.
+    const skill = await readFile(
+      join(folder, "skills", "zootropolis-paperclip.md"),
+      "utf8",
+    );
+    expect(skill).toContain("zootropolis");
+    expect(skill).toContain("action\":\"close");
   });
 
   it("streams stdout chunks during an execute", async () => {
