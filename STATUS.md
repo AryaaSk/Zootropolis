@@ -59,32 +59,52 @@ See `scripts/verify-e2e.md` for the full manual verification script
 - New entity tables for containers (containers ARE Paperclip agents with a layer tag).
 - Camera-animated transitions across browser routes (only within a single Canvas; cross-route is a fade for now).
 
-## v1.1 status (in-progress)
+## v1.1 status — complete
 
-Promoted from v1's deferred list:
+All 17 v1.1 phases shipped on `work/zootropolis-v1` (commits `19b44d2..d0a2fd6`).
 
-- **Real per-VM process isolation** — supported via the external-daemon
-  contract documented in [`docs/agent-runtime-contract.md`](docs/agent-runtime-contract.md).
-  Set `agent.adapterConfig.externalEndpoint = "ws://your-vm:port/"` at hire
-  time (or via `scripts/zootropolis-register-external.ts` after the fact),
-  and the broker stops spawning an in-process daemon for that agent. To
-  forbid in-process daemons entirely, set `ZOOTROPOLIS_RUNTIME_MODE=external_only`.
-  The user is building the daemon side of this; the server contract is stable.
-- **Leaf agents can actually close issues** (Phase D1 + D2). They emit a
-  JSON close marker on their last stdout line; the server recognises it,
-  posts the artifact as a comment, and transitions the issue to `done`.
-  The daemon now also injects a `zootropolis-paperclip` skill into each
-  agent's `skills/` directory on first execute, telling the agent how to
-  use the convention.
+**External daemon support (Phase H1–H4)**
+- Wire-protocol contract: [`docs/agent-runtime-contract.md`](docs/agent-runtime-contract.md).
+- `agent.adapterConfig.externalEndpoint = "ws://your-vm:port/"` short-circuits
+  the broker's in-process daemon spawn — Paperclip just dials your endpoint.
+- `ZOOTROPOLIS_RUNTIME_MODE=external_only` rejects any in-process attempts.
+- `scripts/zootropolis-register-external.ts` patches an existing agent's
+  endpoint after the fact (handy for VM-up-after-hire flows).
 
-In flight (this branch):
+**Leaf agents close their own issues (Phase D1–D3)**
+- JSON close-marker convention (`{zootropolis:{action:"close",status,summary,artifact}}`)
+  on the agent's last stdout line.
+- Server recognises it, posts the artifact as the closing comment, transitions
+  the issue to `done` (or `cancelled`).
+- Daemon injects `skills/zootropolis-paperclip.md` on first execute so the
+  agent knows the contract.
+- `scripts/verify-leaf-roundtrip.ts` verifies end-to-end with real Claude.
+- 9 unit tests for the marker parser; 21 total Zootropolis tests pass.
 
-- Interactive campus (Phase E): drawer with delegated/owed issues, embedded
-  issue quicklook, live transcript inside AgentView.
-- Bottom-up tree creation (Phase F): hire agents/rooms/floors/buildings
-  from inside the campus; "wrap in" promote.
-- Visual upgrade (Phase G): procedural shaders + idle micro-animations
-  (shipped); per-window flicker, sky+fog, GLB decorations (in flight).
+**Interactive campus (Phase E1–E5)**
+- `useContainerIssues` hook returns `{issuedDown, receivedFromAbove}` for any
+  layer, backed by a new server-side `createdByAgentId` filter.
+- `ContainerInspector` side drawer mounted in all 5 views: layer pill,
+  live-status dot, "Tasks delegated", "Tasks I owe" sections.
+- Per-child "+ Delegate to <name>" buttons preserve `parentId` lineage.
+- `IssueQuickLook` embedded in the drawer; back arrow restores layer overview.
+- Live transcript inside AgentView's screen frame when the agent is running.
+
+**Bottom-up tree creation (Phase F1–F4)**
+- Empty-state campus with "+ Hire your first agent".
+- Layer-aware "+ Hire <next layer down>" footer in each view.
+- "+ Wrap me in a room/floor/building/campus" promote — creates the new
+  container at `reportsTo = self.parent`, then PATCHes self under it.
+- UI affordances mirror the strict delegation contract by construction.
+
+**Visual upgrade (Phase G1–G6)**
+- Procedural shaders: wall stucco, roof shingle, grass.
+- Idle micro-animations: animal bob, status-light float, tree sway, cloud drift.
+- Per-window flicker on building shells; intensity scales with descendant activity.
+- Sky gradient + atmospheric fog (`<Sky />` + `<fog>`).
+- Procedural decorations: trees, lampposts, clouds, chimneys, benches —
+  instanced, deterministic positions, no GLB assets.
+- `?lq=1` URL toggle skips postprocess for weak GPUs.
 
 Each of these graduates by swapping one piece — the architecture is
 already shaped so they're additive, not rewrites.
