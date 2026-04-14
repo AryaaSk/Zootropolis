@@ -20,6 +20,13 @@ interface AnimalProps {
   agentId?: string;
   /** When true, renders a StatusLight above the animal. Defaults to true when agentId is provided. */
   showStatusLight?: boolean;
+  /**
+   * Zootropolis J2 — true when the agent's daemon is not responding. Passes
+   * through to StatusLight (red bulb + exclamation badge) and desaturates the
+   * body material so the whole animal reads as "offline". Callers should only
+   * set this for aliaskit_vm leaves; container agents never pass it true.
+   */
+  unreachable?: boolean;
 }
 
 // One-shot pulse: 1.0 → 1.15 → 1.0 over ~600ms. We drive this from useFrame
@@ -50,11 +57,29 @@ function hashPhase(id: string | undefined): number {
  * Simple body cube + small head cube + 2 eye dots. Flat Lambert + outlines.
  * With an agentId, pulses on heartbeat.run.started and status-lights the run.
  */
+// Mix a palette colour toward neutral grey — used when an agent is unreachable
+// so the whole body reads as muted/offline. Kept tiny + allocation-free per
+// render; the mix ratio is fixed (50%) to match the red bulb's clear "off"
+// signal without making the animal invisible.
+function desaturate(hex: string): string {
+  const parsed = hex.replace("#", "");
+  if (parsed.length !== 6) return hex;
+  const r = parseInt(parsed.slice(0, 2), 16);
+  const g = parseInt(parsed.slice(2, 4), 16);
+  const b = parseInt(parsed.slice(4, 6), 16);
+  const gray = 0x90; // warm-neutral grey
+  const mix = (c: number) => Math.round(c * 0.5 + gray * 0.5);
+  return `#${mix(r).toString(16).padStart(2, "0")}${mix(g)
+    .toString(16)
+    .padStart(2, "0")}${mix(b).toString(16).padStart(2, "0")}`;
+}
+
 export function Animal({
   color = palette.terracotta,
   position = [0, 0, 0],
   agentId,
   showStatusLight,
+  unreachable = false,
 }: AnimalProps) {
   const groupRef = useRef<Group>(null);
   const { status, pulseKey } = useAgentLiveStatus(agentId);
@@ -110,20 +135,21 @@ export function Animal({
   });
 
   const renderStatusLight = showStatusLight ?? !!agentId;
+  const bodyColor = unreachable ? desaturate(color) : color;
 
   return (
     <group ref={groupRef} position={position}>
       {/* Body */}
       <mesh position={[0, 0.6, 0]}>
         <boxGeometry args={[1.2, 1.2, 1.6]} />
-        <meshLambertMaterial color={color} />
+        <meshLambertMaterial color={bodyColor} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
 
       {/* Head */}
       <mesh position={[0, 1.55, 0.7]}>
         <boxGeometry args={[0.8, 0.8, 0.8]} />
-        <meshLambertMaterial color={color} />
+        <meshLambertMaterial color={bodyColor} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
 
@@ -140,26 +166,26 @@ export function Animal({
       {/* Legs */}
       <mesh position={[-0.4, -0.1, -0.5]}>
         <boxGeometry args={[0.3, 0.6, 0.3]} />
-        <meshLambertMaterial color={color} />
+        <meshLambertMaterial color={bodyColor} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
       <mesh position={[0.4, -0.1, -0.5]}>
         <boxGeometry args={[0.3, 0.6, 0.3]} />
-        <meshLambertMaterial color={color} />
+        <meshLambertMaterial color={bodyColor} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
       <mesh position={[-0.4, -0.1, 0.5]}>
         <boxGeometry args={[0.3, 0.6, 0.3]} />
-        <meshLambertMaterial color={color} />
+        <meshLambertMaterial color={bodyColor} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
       <mesh position={[0.4, -0.1, 0.5]}>
         <boxGeometry args={[0.3, 0.6, 0.3]} />
-        <meshLambertMaterial color={color} />
+        <meshLambertMaterial color={bodyColor} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
 
-      {renderStatusLight && <StatusLight status={status} />}
+      {renderStatusLight && <StatusLight status={status} unreachable={unreachable} />}
     </group>
   );
 }

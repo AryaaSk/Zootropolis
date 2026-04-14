@@ -17,6 +17,7 @@ import {
   pickAnimalPaletteKey,
   useContainerChildren,
 } from "../hooks/useContainerChildren";
+import { useAgentReachability } from "../hooks/useAgentReachability";
 import { palette } from "../palette";
 import {
   ZoomTransitionProvider,
@@ -34,9 +35,11 @@ const AGENT_LOOKAT: [number, number, number] = [0, 0.8, 0];
 function AgentScene({
   companyId,
   id,
+  unreachable,
 }: {
   companyId: string | undefined;
   id: string | undefined;
+  unreachable: boolean;
 }) {
   const { self, parent, loading } = useContainerChildren(
     companyId ?? "",
@@ -73,7 +76,7 @@ function AgentScene({
         <NotFoundOverlay layer="agent" backHref={backHref} backLabel={backLabel} />
       ) : (
         <>
-          <Animal color={color} agentId={id} />
+          <Animal color={color} agentId={id} unreachable={unreachable} />
           <Text
             position={[0, -0.9, 1.2]}
             rotation={[-Math.PI / 6, 0, 0]}
@@ -149,6 +152,12 @@ function AgentScene({
  */
 export function AgentView() {
   const { companyId, id } = useParams<{ companyId: string; id: string }>();
+  // Zootropolis J2 — reachability hook drives both the Animal's red indicator
+  // (passed into the scene) and the banner overlay below. Hook is gated on
+  // agentId; callers on non-aliaskit-vm agents will see `reachable !== false`
+  // (either null or true if the server reports not_applicable).
+  const reach = useAgentReachability(companyId ?? "", id ?? null);
+  const offline = reach.reachable === false;
 
   return (
     <div className="relative h-[calc(100vh-0px)] w-full">
@@ -158,11 +167,81 @@ export function AgentView() {
         dpr={[1, 2]}
       >
         <ZoomTransitionProvider>
-          <AgentScene companyId={companyId} id={id} />
+          <AgentScene companyId={companyId} id={id} unreachable={offline} />
         </ZoomTransitionProvider>
       </Canvas>
       <CampusOverlay />
+      {offline && <UnreachableBanner onRetry={reach.refetch} error={reach.error} />}
       {companyId && id && <ContainerInspector companyId={companyId} agentId={id} />}
+    </div>
+  );
+}
+
+/**
+ * Zootropolis J2 — top-screen soft-fail banner when the agent's daemon is
+ * not responding. Positioned absolutely over (not inside) the Canvas so it
+ * stays in HTML for accessibility and crisp text. "Retry probe" invalidates
+ * the reachability query to trigger an immediate refetch.
+ */
+function UnreachableBanner({
+  onRetry,
+  error,
+}: {
+  onRetry: () => void;
+  error?: { code: string; message: string };
+}) {
+  const endpointHint =
+    error?.code === "no_endpoint"
+      ? "this agent has no runtimeEndpoint configured"
+      : "the configured runtimeEndpoint";
+  return (
+    <div
+      role="alert"
+      style={{
+        position: "absolute",
+        top: 16,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 20,
+        maxWidth: 640,
+        padding: "10px 16px",
+        background: "rgba(239, 68, 68, 0.16)",
+        border: `1px solid ${palette.clay}`,
+        borderRadius: 8,
+        color: "#7a1d1d",
+        fontSize: 13,
+        lineHeight: 1.4,
+        fontFamily: "ui-sans-serif, system-ui, sans-serif",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        backdropFilter: "blur(4px)",
+      }}
+    >
+      <span>
+        Agent daemon at {endpointHint} not responding. Started your runtime?
+        {error?.message ? (
+          <span style={{ opacity: 0.7, marginLeft: 6, fontSize: 11 }}>
+            ({error.code})
+          </span>
+        ) : null}
+      </span>
+      <button
+        type="button"
+        onClick={onRetry}
+        style={{
+          padding: "4px 10px",
+          background: palette.clay,
+          color: palette.cream,
+          border: "none",
+          borderRadius: 4,
+          cursor: "pointer",
+          fontSize: 12,
+          fontFamily: "inherit",
+        }}
+      >
+        Retry probe
+      </button>
     </div>
   );
 }

@@ -14,6 +14,13 @@ interface StatusLightProps {
   /** Legacy API (pre-B5): kept for backwards compatibility. */
   mode?: StatusMode;
   position?: [number, number, number];
+  /**
+   * Zootropolis J2 — true when the leaf agent's daemon is not responding.
+   * Overrides run-status colours with a bright, non-pulsing red bulb and
+   * renders a small floating red exclamation sphere to the side. Meaningful
+   * only for aliaskit_vm leaves; callers gate on adapterType before passing.
+   */
+  unreachable?: boolean;
 }
 
 // Color targets per status. Running uses cyan (accent), completed uses green,
@@ -21,6 +28,9 @@ interface StatusLightProps {
 const GREEN = "#6fd896";
 const CYAN = palette.accent;
 const RED = palette.clay;
+// Bright saturated red for the J2 unreachable indicator — deliberately hotter
+// than palette.clay so it reads as an alarm rather than a failed-run glow.
+const UNREACHABLE_RED = "#ef4444";
 
 function colorFor(status: AgentLiveStatus): string {
   switch (status) {
@@ -60,15 +70,17 @@ export function StatusLight({
   status,
   mode,
   position = [0, 2.6, 0],
+  unreachable = false,
 }: StatusLightProps) {
   const effective: AgentLiveStatus = status ?? statusFromMode(mode) ?? "idle";
   const meshRef = useRef<Mesh>(null);
   const materialRef = useRef<MeshLambertMaterial>(null);
-  const targetColorRef = useRef(new Color(colorFor(effective)));
+  const effectiveColor = unreachable ? UNREACHABLE_RED : colorFor(effective);
+  const targetColorRef = useRef(new Color(effectiveColor));
 
   // Update color target when status changes — we don't recreate materials
   // each frame; we just lerp the existing material's color/emissive in useFrame.
-  targetColorRef.current.set(colorFor(effective));
+  targetColorRef.current.set(effectiveColor);
 
   useFrame(({ clock }) => {
     const mesh = meshRef.current;
@@ -79,8 +91,10 @@ export function StatusLight({
     // Idle float (G3) — gentle sine on Y when the agent isn't actively running.
     // Skipped during "running" so the emissive pulse stays the load-bearing
     // load signal and the light doesn't visually drift while it pulses.
+    // Also skipped when `unreachable` so the red alarm stays visually anchored
+    // rather than gently bobbing (distinct signal: something's wrong, not fine).
     // Amplitude 5mm, frequency 0.3Hz.
-    if (effective === "running") {
+    if (effective === "running" || unreachable) {
       mesh.position.y = position[1];
     } else {
       mesh.position.y = position[1] + Math.sin(t * Math.PI * 2 * 0.3) * 0.005;
@@ -92,12 +106,15 @@ export function StatusLight({
     material.emissive.lerp(targetColorRef.current, 0.15);
 
     // Emissive intensity:
+    //   unreachable → solid 1.4 (non-pulsing; clearly "wrong")
     //   running  → sine-wave 0.8..1.4 at ~1.5 Hz
     //   completed → solid 1.2
     //   failed    → solid 1.2
     //   idle      → steady 0.8
     let target = 0.8;
-    if (effective === "running") {
+    if (unreachable) {
+      target = 1.4;
+    } else if (effective === "running") {
       target = 1.1 + Math.sin(t * Math.PI * 2 * 1.5) * 0.3;
     } else if (effective === "completed" || effective === "failed") {
       target = 1.2;
@@ -105,16 +122,31 @@ export function StatusLight({
     material.emissiveIntensity += (target - material.emissiveIntensity) * 0.2;
   });
 
-  const initialColor = colorFor(effective);
+  const initialColor = effectiveColor;
   return (
-    <mesh ref={meshRef} position={position}>
-      <sphereGeometry args={[0.18, 16, 16]} />
-      <meshLambertMaterial
-        ref={materialRef}
-        color={initialColor}
-        emissive={initialColor}
-        emissiveIntensity={0.8}
-      />
-    </mesh>
+    <group>
+      <mesh ref={meshRef} position={position}>
+        <sphereGeometry args={[0.18, 16, 16]} />
+        <meshLambertMaterial
+          ref={materialRef}
+          color={initialColor}
+          emissive={initialColor}
+          emissiveIntensity={0.8}
+        />
+      </mesh>
+      {unreachable && (
+        // Small red exclamation sphere offset to the side — deliberately off the
+        // main light bulb so two signals (run status + reachability) could in
+        // principle coexist. Non-animated so it reads as a static alarm badge.
+        <mesh position={[position[0] + 0.28, position[1] + 0.18, position[2]]}>
+          <sphereGeometry args={[0.08, 12, 12]} />
+          <meshLambertMaterial
+            color={UNREACHABLE_RED}
+            emissive={UNREACHABLE_RED}
+            emissiveIntensity={1.6}
+          />
+        </mesh>
+      )}
+    </group>
   );
 }

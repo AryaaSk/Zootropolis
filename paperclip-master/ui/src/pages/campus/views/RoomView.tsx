@@ -20,6 +20,7 @@ import {
   useContainerChildren,
 } from "../hooks/useContainerChildren";
 import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
+import { useAgentReachability } from "../hooks/useAgentReachability";
 import { palette } from "../palette";
 import {
   ZoomTransitionProvider,
@@ -40,10 +41,12 @@ function animalPosition(index: number, total: number): [number, number, number] 
 
 function ClickableAnimal({
   agent,
+  companyId,
   position,
   onClick,
 }: {
   agent: Agent;
+  companyId: string;
   position: [number, number, number];
   onClick: () => void;
 }) {
@@ -52,6 +55,13 @@ function ClickableAnimal({
   const [x, y, z] = position;
   const lift = hovered ? 0.2 : 0;
   const color = palette[pickAnimalPaletteKey(agent.id)];
+
+  // Zootropolis J2 — only probe aliaskit_vm leaves. Container / non-vm agents
+  // never show a red dot (they don't have a daemon to reach). The hook
+  // short-circuits when agentId is null, so we gate by adapterType here.
+  const isLeaf = agent.adapterType === "aliaskit_vm";
+  const { reachable } = useAgentReachability(companyId, isLeaf ? agent.id : null);
+  const unreachable = isLeaf && reachable === false;
 
   return (
     <group
@@ -66,7 +76,7 @@ function ClickableAnimal({
         onClick();
       }}
     >
-      <Animal color={color} agentId={agent.id} />
+      <Animal color={color} agentId={agent.id} unreachable={unreachable} />
       <Text
         position={[0, -0.45, 1.2]}
         rotation={[-Math.PI / 6, 0, 0]}
@@ -125,6 +135,7 @@ function RoomScene({
               <ClickableAnimal
                 key={agent.id}
                 agent={agent}
+                companyId={companyId ?? ""}
                 position={pos}
                 onClick={() =>
                   transitionTo(
