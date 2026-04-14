@@ -36,7 +36,6 @@ import {
   approvalService,
   companySkillService,
   budgetService,
-  getPortBroker,
   heartbeatService,
   issueApprovalService,
   issueService,
@@ -2175,17 +2174,9 @@ export function agentRoutes(db: Db) {
       return;
     }
 
-    // Zootropolis: tear down the daemon + free the port for aliaskit_vm leaves.
-    if (agent.adapterType === "aliaskit_vm") {
-      try {
-        await getPortBroker(db).release(agent.id);
-      } catch (err) {
-        console.warn(
-          `Zootropolis port broker: failed to release for ${agent.id}:`,
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-    }
+    // Zootropolis (Phase L): external daemons own their own lifecycle on
+    // remote hosts — Paperclip has nothing to tear down locally. The
+    // operator's controller handles VM/container teardown.
 
     await logActivity(db, {
       companyId: agent.companyId,

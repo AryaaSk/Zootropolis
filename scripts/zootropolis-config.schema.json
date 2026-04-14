@@ -17,38 +17,13 @@
         }
       }
     },
-    "runtime": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "mode": {
-          "type": "string",
-          "enum": ["mixed", "external_only"],
-          "description": "'mixed' (default): aliaskit_vm leaves may use either an external daemon endpoint or a dev-spawned local daemon. 'external_only': reject aliaskit_vm hires without adapterConfig.externalEndpoint. Maps to ZOOTROPOLIS_RUNTIME_MODE."
-        },
-        "portRange": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["start", "end"],
-          "properties": {
-            "start": { "type": "integer", "minimum": 1024, "maximum": 65535 },
-            "end":   { "type": "integer", "minimum": 1024, "maximum": 65535 }
-          },
-          "description": "TCP range the port broker picks from for in-process dev daemons. Maps to ZOOTROPOLIS_PORT_RANGE_{START,END}."
-        },
-        "agentsRoot": {
-          "type": "string",
-          "description": "Directory where per-agent folders live (`.claude/`, `workspace/`, `memory.md`, `identity.json`, …). Tilde is expanded. Maps to ZOOTROPOLIS_AGENTS_ROOT."
-        }
-      }
-    },
     "aliaskit": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "useReal": {
           "type": "boolean",
-          "description": "Wire the real AliasKit API for identity provisioning. Default false = mock identities in identity.json. Maps to ZOOTROPOLIS_USE_REAL_ALIASKIT."
+          "description": "Wire the real AliasKit API for identity provisioning. Default false = mock identities embedded in agents.metadata.zootropolis.aliaskit and served via GET /api/companies/:id/agents/:id/identity. Maps to ZOOTROPOLIS_USE_REAL_ALIASKIT."
         }
       }
     }

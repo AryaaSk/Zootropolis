@@ -13,16 +13,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-
-/** Expand leading ~ in a path. Shell doesn't do it inside single-quoted env values. */
-function expandTilde(value) {
-  if (typeof value !== "string") return value;
-  if (value === "~") return homedir();
-  if (value.startsWith("~/")) return resolve(homedir(), value.slice(2));
-  return value;
-}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = resolve(__dirname, "..", "zootropolis.config.json");
@@ -54,10 +45,6 @@ emit(
     : cfg?.delegation?.strict === false ? "false"
     : undefined,
 );
-emit("ZOOTROPOLIS_RUNTIME_MODE", cfg?.runtime?.mode);
-emit("ZOOTROPOLIS_PORT_RANGE_START", cfg?.runtime?.portRange?.start);
-emit("ZOOTROPOLIS_PORT_RANGE_END", cfg?.runtime?.portRange?.end);
-emit("ZOOTROPOLIS_AGENTS_ROOT", expandTilde(cfg?.runtime?.agentsRoot));
 emit(
   "ZOOTROPOLIS_USE_REAL_ALIASKIT",
   cfg?.aliaskit?.useReal === true ? "true"
