@@ -8,6 +8,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PAPERCLIP_HOME="${REPO_ROOT}/.paperclip"
+# Zootropolis: strict parent↔child issue delegation + agent visibility scoping.
+# See design.md §3 + §4. Set to false (or unset) to fall back to vanilla
+# Paperclip semantics.
+export ZOOTROPOLIS_DELEGATION_STRICT=true
 
 cd "${REPO_ROOT}/paperclip-master"
 
