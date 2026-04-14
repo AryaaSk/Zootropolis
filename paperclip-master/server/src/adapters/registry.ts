@@ -55,6 +55,15 @@ import {
   agentConfigurationDoc as openclawGatewayAgentConfigurationDoc,
   models as openclawGatewayModels,
 } from "@paperclipai/adapter-openclaw-gateway";
+import {
+  execute as aliaskitVmExecute,
+  testEnvironment as aliaskitVmTestEnvironment,
+  onHireApproved as aliaskitVmOnHireApproved,
+} from "@paperclipai/adapter-aliaskit-vm/server";
+import {
+  agentConfigurationDoc as aliaskitVmAgentConfigurationDoc,
+  models as aliaskitVmModels,
+} from "@paperclipai/adapter-aliaskit-vm";
 import { listCodexModels } from "./codex-models.js";
 import { listCursorModels } from "./cursor-models.js";
 import {
@@ -152,6 +161,16 @@ const openclawGatewayAdapter: ServerAdapterModule = {
   agentConfigurationDoc: openclawGatewayAgentConfigurationDoc,
 };
 
+const aliaskitVmAdapter: ServerAdapterModule = {
+  type: "aliaskit_vm",
+  execute: aliaskitVmExecute,
+  testEnvironment: aliaskitVmTestEnvironment,
+  onHireApproved: aliaskitVmOnHireApproved,
+  models: aliaskitVmModels,
+  supportsLocalAgentJwt: false,
+  agentConfigurationDoc: aliaskitVmAgentConfigurationDoc,
+};
+
 const openCodeLocalAdapter: ServerAdapterModule = {
   type: "opencode_local",
   execute: openCodeExecute,
@@ -213,6 +232,7 @@ function registerBuiltInAdapters() {
     cursorLocalAdapter,
     geminiLocalAdapter,
     openclawGatewayAdapter,
+    aliaskitVmAdapter,
     hermesLocalAdapter,
     processAdapter,
     httpAdapter,
