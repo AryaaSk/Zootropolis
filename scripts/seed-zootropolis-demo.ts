@@ -43,18 +43,22 @@ interface AgentSpec {
   title?: string;
 }
 
+// Note: Paperclip's AGENT_ROLES is a fixed enum (ceo|cto|cmo|cfo|engineer|
+// designer|pm|qa|devops|researcher|general). Zootropolis container agents
+// use "general" since they're pure delegators and there's no semantic role
+// for "container owner" in Paperclip's vocabulary.
 const TREE: AgentSpec[] = [
-  { key: "campus_hq",       name: "HQ",                  layer: "campus",   role: "ceo", title: "Campus" },
-  { key: "bld_product",     name: "Product",             layer: "building", parentKey: "campus_hq",       role: "manager",  title: "Building Owner" },
-  { key: "fl_engineering",  name: "Engineering",         layer: "floor",    parentKey: "bld_product",     role: "manager",  title: "Floor Owner" },
-  { key: "fl_research",     name: "Research",            layer: "floor",    parentKey: "bld_product",     role: "manager",  title: "Floor Owner" },
-  { key: "rm_backend",      name: "Backend",             layer: "room",     parentKey: "fl_engineering",  role: "manager",  title: "Room Owner" },
-  { key: "rm_frontend",     name: "Frontend",            layer: "room",     parentKey: "fl_engineering",  role: "manager",  title: "Room Owner" },
-  { key: "rm_notes",        name: "Notes",               layer: "room",     parentKey: "fl_research",     role: "manager",  title: "Room Owner" },
-  { key: "ag_be1",          name: "backend-worker-1",    layer: "agent",    parentKey: "rm_backend",      role: "engineer", title: "Backend Engineer" },
-  { key: "ag_be2",          name: "backend-worker-2",    layer: "agent",    parentKey: "rm_backend",      role: "engineer", title: "Backend Engineer" },
-  { key: "ag_fe1",          name: "frontend-worker-1",   layer: "agent",    parentKey: "rm_frontend",     role: "engineer", title: "Frontend Engineer" },
-  { key: "ag_fe2",          name: "frontend-worker-2",   layer: "agent",    parentKey: "rm_frontend",     role: "engineer", title: "Frontend Engineer" },
+  { key: "campus_hq",       name: "HQ",                  layer: "campus",   role: "ceo",        title: "Campus Owner" },
+  { key: "bld_product",     name: "Product",             layer: "building", parentKey: "campus_hq",       role: "general",   title: "Building Owner" },
+  { key: "fl_engineering",  name: "Engineering",         layer: "floor",    parentKey: "bld_product",     role: "general",   title: "Floor Owner" },
+  { key: "fl_research",     name: "Research",            layer: "floor",    parentKey: "bld_product",     role: "general",   title: "Floor Owner" },
+  { key: "rm_backend",      name: "Backend",             layer: "room",     parentKey: "fl_engineering",  role: "general",   title: "Room Owner" },
+  { key: "rm_frontend",     name: "Frontend",            layer: "room",     parentKey: "fl_engineering",  role: "general",   title: "Room Owner" },
+  { key: "rm_notes",        name: "Notes",               layer: "room",     parentKey: "fl_research",     role: "general",   title: "Room Owner" },
+  { key: "ag_be1",          name: "backend-worker-1",    layer: "agent",    parentKey: "rm_backend",      role: "engineer",  title: "Backend Engineer" },
+  { key: "ag_be2",          name: "backend-worker-2",    layer: "agent",    parentKey: "rm_backend",      role: "engineer",  title: "Backend Engineer" },
+  { key: "ag_fe1",          name: "frontend-worker-1",   layer: "agent",    parentKey: "rm_frontend",     role: "engineer",  title: "Frontend Engineer" },
+  { key: "ag_fe2",          name: "frontend-worker-2",   layer: "agent",    parentKey: "rm_frontend",     role: "engineer",  title: "Frontend Engineer" },
   { key: "ag_rs1",          name: "researcher-1",        layer: "agent",    parentKey: "rm_notes",        role: "researcher", title: "Researcher" },
   { key: "ag_rs2",          name: "researcher-2",        layer: "agent",    parentKey: "rm_notes",        role: "researcher", title: "Researcher" },
 ];
