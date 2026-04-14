@@ -1,5 +1,7 @@
+import { useEffect, useMemo, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Text, Html } from "@react-three/drei";
+import { useQuery } from "@tanstack/react-query";
 import { readZootropolisLayer, type ZootropolisAgentMetadata } from "@paperclipai/shared";
 import { useParams } from "@/lib/router";
 import { Animal } from "../components/Animal";
@@ -21,6 +23,10 @@ import {
   useIsTransitioning,
   useZoomInEntrance,
 } from "../lib/zoom-transition";
+import { heartbeatsApi, type LiveRunForIssue } from "../../../api/heartbeats";
+import { queryKeys } from "../../../lib/queryKeys";
+import type { TranscriptEntry } from "../../../adapters";
+import { useLiveRunTranscripts } from "../../../components/transcript/useLiveRunTranscripts";
 
 const AGENT_CAMERA: [number, number, number] = [4, 3.5, 5];
 const AGENT_LOOKAT: [number, number, number] = [0, 0.8, 0];
@@ -110,7 +116,11 @@ function AgentScene({
                 borderRadius: 2,
               }}
             >
-              <VmStreamPlaceholder agentId={id ?? ""} metadata={self?.metadata as ZootropolisAgentMetadata | null | undefined} />
+              <ScreenContent
+                companyId={companyId ?? ""}
+                agentId={id ?? ""}
+                metadata={self?.metadata as ZootropolisAgentMetadata | null | undefined}
+              />
             </Html>
           </group>
         </>
@@ -190,6 +200,174 @@ function VmStreamPlaceholder(props: {
       <div style={{ marginTop: 8, opacity: 0.5 }}>
         live VNC stream lands when Cua/Coasty integration ships
       </div>
+    </div>
+  );
+}
+
+/**
+ * Chooses between the static VM-stream placeholder and a live scrolling
+ * transcript for the agent's currently-running heartbeat run. Falls back to
+ * the placeholder when there's no active run (idle/completed/failed).
+ */
+function ScreenContent(props: {
+  companyId: string;
+  agentId: string;
+  metadata?: ZootropolisAgentMetadata | null;
+}) {
+  const { companyId, agentId, metadata } = props;
+  const enabled = !!companyId && !!agentId;
+  const { data: liveRuns, isLoading: liveRunsLoading } = useQuery({
+    queryKey: queryKeys.liveRuns(companyId),
+    queryFn: () => heartbeatsApi.liveRunsForCompany(companyId),
+    enabled,
+    refetchInterval: 10_000,
+  });
+
+  const activeRun = useMemo<LiveRunForIssue | null>(() => {
+    if (!liveRuns) return null;
+    return (
+      liveRuns.find(
+        (run) => run.agentId === agentId && run.status === "running",
+      ) ?? null
+    );
+  }, [liveRuns, agentId]);
+
+  if (liveRunsLoading && !liveRuns) {
+    return (
+      <div style={{ opacity: 0.6 }}>Loading transcript…</div>
+    );
+  }
+
+  if (activeRun) {
+    return (
+      <LiveTranscript
+        companyId={companyId}
+        run={activeRun}
+      />
+    );
+  }
+
+  return <VmStreamPlaceholder agentId={agentId} metadata={metadata} />;
+}
+
+const KIND_COLOR: Record<string, string> = {
+  assistant: "#a5d8ff",
+  thinking: "#b197fc",
+  user: "#ffd8a8",
+  tool_call: "#ffe066",
+  tool_result: "#c0eb75",
+  init: "#63e6be",
+  result: "#74c0fc",
+  stderr: "#ff8787",
+  system: "#868e96",
+  stdout: "#f1f3f5",
+  diff: "#eebefa",
+};
+
+const KIND_PREFIX: Record<string, string> = {
+  assistant: "assistant",
+  thinking: "think",
+  user: "user",
+  tool_call: "tool",
+  tool_result: "result",
+  init: "init",
+  result: "done",
+  stderr: "err",
+  system: "sys",
+  stdout: "out",
+  diff: "diff",
+};
+
+function entryText(entry: TranscriptEntry): string {
+  switch (entry.kind) {
+    case "assistant":
+    case "thinking":
+    case "user":
+    case "stderr":
+    case "system":
+    case "stdout":
+    case "diff":
+      return entry.text;
+    case "tool_call":
+      return `${entry.name}(${typeof entry.input === "string" ? entry.input : JSON.stringify(entry.input ?? {})})`;
+    case "tool_result":
+      return entry.content;
+    case "init":
+      return `session ${entry.sessionId.slice(0, 8)} • ${entry.model}`;
+    case "result":
+      return entry.text || (entry.isError ? "error" : "done");
+    default:
+      return "";
+  }
+}
+
+const MAX_LINES = 30;
+
+function LiveTranscript(props: { companyId: string; run: LiveRunForIssue }) {
+  const { companyId, run } = props;
+  const runSources = useMemo(
+    () => [
+      {
+        id: run.id,
+        status: run.status,
+        adapterType: run.adapterType,
+      },
+    ],
+    [run.id, run.status, run.adapterType],
+  );
+  const { transcriptByRun, isInitialHydrating } = useLiveRunTranscripts({
+    runs: runSources,
+    companyId,
+    maxChunksPerRun: 120,
+  });
+
+  const entries = useMemo(() => {
+    const all = transcriptByRun.get(run.id) ?? [];
+    return all.slice(-MAX_LINES);
+  }, [transcriptByRun, run.id]);
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [entries]);
+
+  if (isInitialHydrating && entries.length === 0) {
+    return <div style={{ opacity: 0.6 }}>Loading transcript…</div>;
+  }
+
+  return (
+    <div
+      ref={scrollRef}
+      style={{
+        height: "100%",
+        overflowY: "auto",
+        fontFamily: "ui-monospace, monospace",
+        fontSize: 9,
+        lineHeight: 1.35,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+      }}
+    >
+      {entries.length === 0 ? (
+        <div style={{ opacity: 0.6 }}>
+          run {run.id.slice(0, 8)} • waiting for output…
+        </div>
+      ) : (
+        entries.map((entry, idx) => {
+          const color = KIND_COLOR[entry.kind] ?? palette.cream;
+          const prefix = KIND_PREFIX[entry.kind] ?? entry.kind;
+          const text = entryText(entry);
+          return (
+            <div key={`${entry.ts}:${idx}`} style={{ color, opacity: 0.95 }}>
+              <span style={{ opacity: 0.55 }}>{prefix}</span>
+              {" "}
+              {text}
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }
