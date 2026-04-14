@@ -4,6 +4,10 @@
 # Local Paperclip data (per-instance DB, configs, secrets)
 .paperclip/
 
+# Per-machine Claude Code settings at repo root (project-scoped .claude
+# directories under subprojects, e.g. paperclip-master/.claude/, are tracked)
+/.claude/
+
 # Local agent runtime folders (one per leaf agent, populated at hire)
 agents/
 

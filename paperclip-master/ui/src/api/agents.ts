@@ -49,6 +49,8 @@ export interface OrgNode {
   name: string;
   role: string;
   status: string;
+  /** Full agent metadata blob; carries Zootropolis layer tag at metadata.zootropolis.layer */
+  metadata?: Record<string, unknown> | null;
   reports: OrgNode[];
 }
 

@@ -11,7 +11,15 @@ import { EmptyState } from "../components/EmptyState";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { AgentIcon } from "../components/AgentIconPicker";
 import { Download, Network, Upload } from "lucide-react";
-import { AGENT_ROLE_LABELS, type Agent } from "@paperclipai/shared";
+import { AGENT_ROLE_LABELS, readZootropolisLayer, type Agent, type ZootropolisLayer } from "@paperclipai/shared";
+
+const ZOOTROPOLIS_LAYER_COLORS: Record<ZootropolisLayer, string> = {
+  agent: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+  room: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
+  floor: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-200",
+  building: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
+  campus: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200",
+};
 
 // Layout constants
 const CARD_W = 200;
@@ -408,8 +416,20 @@ export function OrgChart() {
                 </div>
                 {/* Name + role + adapter type */}
                 <div className="flex flex-col items-start min-w-0 flex-1">
-                  <span className="text-sm font-semibold text-foreground leading-tight">
+                  <span className="text-sm font-semibold text-foreground leading-tight flex items-center gap-1.5">
                     {node.name}
+                    {(() => {
+                      const layer = readZootropolisLayer(agent?.metadata);
+                      if (!layer) return null;
+                      return (
+                        <span
+                          className={`text-[9px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded ${ZOOTROPOLIS_LAYER_COLORS[layer]}`}
+                          title={`Zootropolis layer: ${layer}`}
+                        >
+                          {layer}
+                        </span>
+                      );
+                    })()}
                   </span>
                   <span className="text-[11px] text-muted-foreground leading-tight mt-0.5">
                     {agent?.title ?? roleLabel(node.role)}
