@@ -39,28 +39,21 @@ type HireSpec = {
   layer: ZootropolisLayer;
 };
 
-/** What can I hire from a given layer? Keyed by the CURRENT view's layer. */
+/**
+ * Phase I2: hiring is now campus-root only, and only produces leaf agents.
+ * Structure (rooms/floors/buildings/campus-layer containers) is built by
+ * wrapping or re-parenting existing agents — never by "hiring into X".
+ * The old hireOptionsFor() with per-layer options has been removed.
+ */
 function hireOptionsFor(
   currentLayer: ZootropolisLayer | "campus-root",
 ): HireSpec[] {
-  switch (currentLayer) {
-    case "campus-root":
-      return [
-        { label: "+ Hire one agent", layer: "agent" },
-        { label: "+ Hire a building", layer: "building" },
-      ];
-    case "campus":
-      return [{ label: "+ Hire a building", layer: "building" }];
-    case "building":
-      return [{ label: "+ Hire a floor in this building", layer: "floor" }];
-    case "floor":
-      return [{ label: "+ Hire a room on this floor", layer: "room" }];
-    case "room":
-      return [{ label: "+ Hire an agent into this room", layer: "agent" }];
-    case "agent":
-    default:
-      return [];
+  // Only campus-root offers a hire action, and it always creates a leaf.
+  // The endpoint field (required, Phase I1) is collected by HireForm.
+  if (currentLayer === "campus-root") {
+    return [{ label: "+ Hire an agent", layer: "agent" }];
   }
+  return [];
 }
 
 /**
@@ -804,26 +797,49 @@ export function HireForm({
   submitLabel?: string;
 }) {
   const [name, setName] = useState("");
+  const [endpoint, setEndpoint] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
+
+  // Phase I1/I2: aliaskit_vm (leaf) hires require a WebSocket endpoint —
+  // Paperclip never auto-spawns a daemon, so the operator tells us where
+  // their runtime is listening. Container-layer hires (claude_local) don't
+  // need an endpoint.
+  const needsEndpoint = layer === "agent";
+  const endpointTrim = endpoint.trim();
+  const endpointValid =
+    !needsEndpoint ||
+    endpointTrim.startsWith("ws://") ||
+    endpointTrim.startsWith("wss://");
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed || submitting) return;
+    if (needsEndpoint && !endpointValid) {
+      setError(
+        "Runtime endpoint must start with ws:// or wss://. See docs/external-daemon-quickstart.md.",
+      );
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       const adapterType = layer === "agent" ? "aliaskit_vm" : "claude_local";
       const role = layer === "agent" ? "engineer" : "general";
+      const adapterConfig: Record<string, unknown> = {};
+      if (needsEndpoint) {
+        adapterConfig.externalEndpoint = endpointTrim;
+        adapterConfig.runtimeEndpoint = endpointTrim;
+      }
       const body: Record<string, unknown> = {
         name: trimmed,
         role,
         title: null,
         reportsTo: parentAgentId,
         adapterType,
-        adapterConfig: {},
+        adapterConfig,
         runtimeConfig: {},
         budgetMonthlyCents: 5000,
         metadata: {
@@ -838,6 +854,7 @@ export function HireForm({
         queryKey: queryKeys.agents.list(companyId),
       });
       setName("");
+      setEndpoint("");
       onCreated?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -866,6 +883,29 @@ export function HireForm({
           color: palette.ink,
         }}
       />
+      {needsEndpoint && (
+        <>
+          <input
+            type="text"
+            placeholder="ws://your-host:7100/"
+            value={endpoint}
+            onChange={(e) => setEndpoint(e.target.value)}
+            disabled={submitting}
+            className="w-full rounded border px-2 py-1 text-xs outline-none font-mono"
+            style={{
+              borderColor:
+                endpointTrim.length > 0 && !endpointValid
+                  ? palette.clay
+                  : `${palette.ink}55`,
+              backgroundColor: palette.bone,
+              color: palette.ink,
+            }}
+          />
+          <div className="text-[10px] italic" style={{ color: `${palette.ink}88` }}>
+            Agent daemon WebSocket URL. See <code>docs/external-daemon-quickstart.md</code>.
+          </div>
+        </>
+      )}
       {error && (
         <div className="text-[10px]" style={{ color: palette.clay }}>
           {error}
@@ -874,7 +914,11 @@ export function HireForm({
       <div className="flex items-center gap-1.5">
         <button
           type="submit"
-          disabled={submitting || name.trim().length === 0}
+          disabled={
+            submitting ||
+            name.trim().length === 0 ||
+            (needsEndpoint && (endpointTrim.length === 0 || !endpointValid))
+          }
           className="rounded border px-2 py-1 text-xs font-medium disabled:opacity-50"
           style={{
             borderColor: palette.ink,

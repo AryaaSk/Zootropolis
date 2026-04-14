@@ -47,6 +47,7 @@ import {
 } from "../services/index.js";
 import { conflict, forbidden, notFound, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, assertInstanceAdmin, getActorInfo } from "./authz.js";
+import { probeAgentRuntime } from "../services/agent-runtime-probe.js";
 import {
   detectAdapterModel,
   findActiveServerAdapter,
@@ -826,6 +827,28 @@ export function agentRoutes(db: Db) {
       res.json(result);
     },
   );
+
+  // Zootropolis J1 — per-agent reachability probe. Opens a short-lived
+  // WebSocket to adapterConfig.runtimeEndpoint, sends HelloFrame, awaits
+  // ReadyFrame with a 2s timeout. Drives the red-dot / AgentView banner
+  // soft-fail UX. Only meaningful for aliaskit_vm leaf agents; others return
+  // {reachable:false, error:{code:"not_applicable"}}.
+  router.get("/companies/:companyId/agents/:id/runtime-probe", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    if (agent.companyId !== companyId) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    const result = await probeAgentRuntime(id, db);
+    res.json(result);
+  });
 
   router.get("/agents/:id/skills", async (req, res) => {
     const id = req.params.id as string;
