@@ -8,6 +8,7 @@ import {
   Search,
   SquarePen,
   Network,
+  LandPlot,
   Boxes,
   Repeat,
   Settings,
@@ -109,6 +110,13 @@ export function Sidebar() {
 
         <SidebarSection label="Company">
           <SidebarNavItem to="/org" label="Org" icon={Network} />
+          {selectedCompanyId && (
+            <SidebarNavItem
+              to={`/campus/${selectedCompanyId}`}
+              label="Campus"
+              icon={LandPlot}
+            />
+          )}
           <SidebarNavItem to="/skills" label="Skills" icon={Boxes} />
           <SidebarNavItem to="/costs" label="Costs" icon={DollarSign} />
           <SidebarNavItem to="/activity" label="Activity" icon={History} />
