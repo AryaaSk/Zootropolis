@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import type { BillingType, ExecutionWorkspace, ExecutionWorkspaceConfig } from "@paperclipai/shared";
+import { readZootropolisCloseMarker } from "@paperclipai/shared";
 import {
   agents,
   agentRuntimeState,
@@ -3484,8 +3485,16 @@ export function heartbeatService(db: Db) {
           },
         });
         if (issueId && outcome === "succeeded") {
+          // Zootropolis (Phase D1): if the agent emitted the close marker as
+          // its last stdout JSON object, prefer artifact/summary from it for
+          // the closing comment AND transition the issue to status="done".
+          // Absent or malformed marker → fall back to today's behaviour.
+          const closeMarker = readZootropolisCloseMarker(persistedResultJson);
           try {
-            const issueComment = buildHeartbeatRunIssueComment(persistedResultJson);
+            const issueComment =
+              closeMarker?.artifact
+              ?? closeMarker?.summary
+              ?? buildHeartbeatRunIssueComment(persistedResultJson);
             if (issueComment) {
               await issuesSvc.addComment(issueId, issueComment, { agentId: agent.id, runId: finalizedRun.id });
             }
@@ -3494,6 +3503,26 @@ export function heartbeatService(db: Db) {
               "stderr",
               `[paperclip] Failed to post run summary comment: ${err instanceof Error ? err.message : String(err)}\n`,
             );
+          }
+          if (closeMarker) {
+            try {
+              await issuesSvc.update(issueId, {
+                status: closeMarker.status ?? "done",
+                actorAgentId: agent.id,
+              });
+              await appendRunEvent(finalizedRun, seq++, {
+                eventType: "lifecycle",
+                stream: "system",
+                level: "info",
+                message: `zootropolis: agent closed issue (status=${closeMarker.status ?? "done"})`,
+                payload: { issueId, status: closeMarker.status ?? "done" },
+              });
+            } catch (err) {
+              await onLog(
+                "stderr",
+                `[paperclip] Zootropolis: failed to apply close marker: ${err instanceof Error ? err.message : String(err)}\n`,
+              );
+            }
           }
         }
         await finalizeIssueCommentPolicy(finalizedRun, agent);

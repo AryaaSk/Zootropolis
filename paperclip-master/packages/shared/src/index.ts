@@ -640,10 +640,13 @@ export {
   ZOOTROPOLIS_LAYERS,
   isZootropolisLayer,
   readZootropolisLayer,
+  readZootropolisCloseMarker,
   type ZootropolisLayer,
   type ZootropolisRuntime,
   type ZootropolisAliasHandles,
   type ZootropolisAgentMetadata,
+  type ZootropolisCloseMarker,
+  type ZootropolisResultEnvelope,
 } from "./zootropolis.js";
 export { normalizeAgentUrlKey, deriveAgentUrlKey, isUuidLike } from "./agent-url-key.js";
 export { deriveProjectUrlKey, normalizeProjectUrlKey, hasNonAsciiContent } from "./project-url-key.js";

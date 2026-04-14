@@ -1,9 +1,12 @@
 import { useRef, type ReactNode } from "react";
 import { Edges, Text } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import type { Group } from "three";
+import { Color, type Group } from "three";
 import { palette } from "../palette";
 import type { ContainerLiveStatus } from "../hooks/useContainerLiveStatus";
+import "../shaders/wall-stucco";
+import "../shaders/roof-shingle";
+import "../shaders/grass";
 
 export type ContainerLayer = "room" | "floor" | "building" | "campus";
 

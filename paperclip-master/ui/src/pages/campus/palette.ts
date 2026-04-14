@@ -29,6 +29,10 @@ export const palette = {
   // Accent (status / active)
   accent: "#6fd4c4",
 
+  // Grass (G1 campus ground shader — two greens)
+  grassLight: "#a9c98b",
+  grassDark: "#7ea862",
+
   // Outline / detail
   ink: "#2a2420",
 } as const;

@@ -62,3 +62,43 @@ export function readZootropolisLayer(metadata: unknown): ZootropolisLayer | unde
   const layer = (z as Record<string, unknown>).layer;
   return isZootropolisLayer(layer) ? layer : undefined;
 }
+
+// ---------------------------------------------------------------------------
+// Issue-close marker (Phase D1)
+//
+// Convention: a leaf agent's underlying CLI emits a JSON object as its LAST
+// stdout line. If the object contains a `zootropolis` field matching the
+// shape below, the heartbeat runner will (a) post `artifact` as the issue's
+// closing comment and (b) transition the assigned issue to `status` (default
+// "done"). Absent or malformed markers fall back to today's behaviour: the
+// run finishes, stdout-tail becomes a comment, the issue stays open.
+// ---------------------------------------------------------------------------
+
+export interface ZootropolisCloseMarker {
+  action: "close";
+  status?: "done" | "cancelled";
+  summary?: string;
+  artifact?: string;
+}
+
+export interface ZootropolisResultEnvelope {
+  zootropolis: ZootropolisCloseMarker;
+}
+
+export function readZootropolisCloseMarker(
+  resultJson: unknown,
+): ZootropolisCloseMarker | null {
+  if (!resultJson || typeof resultJson !== "object" || Array.isArray(resultJson)) return null;
+  const z = (resultJson as Record<string, unknown>).zootropolis;
+  if (!z || typeof z !== "object" || Array.isArray(z)) return null;
+  const marker = z as Record<string, unknown>;
+  if (marker.action !== "close") return null;
+  const status =
+    marker.status === "cancelled" ? "cancelled"
+    : "done";
+  const summary = typeof marker.summary === "string" && marker.summary.trim().length > 0
+    ? marker.summary.trim() : undefined;
+  const artifact = typeof marker.artifact === "string" && marker.artifact.trim().length > 0
+    ? marker.artifact : undefined;
+  return { action: "close", status, summary, artifact };
+}
