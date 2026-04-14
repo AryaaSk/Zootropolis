@@ -12,6 +12,7 @@ import { Color } from "three";
 const WallStuccoMaterialImpl = shaderMaterial(
   {
     color: new Color("#f2ebdc"),
+    uOpacity: 1.0,
   },
   /* glsl */ `
     varying vec3 vWorldPos;
@@ -25,6 +26,7 @@ const WallStuccoMaterialImpl = shaderMaterial(
   `,
   /* glsl */ `
     uniform vec3 color;
+    uniform float uOpacity;
     varying vec3 vWorldPos;
     varying vec3 vNormal;
 
@@ -62,7 +64,7 @@ const WallStuccoMaterialImpl = shaderMaterial(
 
       float lambert = max(dot(normalize(vNormal), normalize(vec3(0.4, 1.0, 0.2))), 0.0);
       vec3 lit = tinted * (0.75 + 0.25 * lambert);
-      gl_FragColor = vec4(lit, 1.0);
+      gl_FragColor = vec4(lit, uOpacity);
     }
   `
 );

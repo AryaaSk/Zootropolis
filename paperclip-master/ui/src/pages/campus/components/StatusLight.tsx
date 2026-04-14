@@ -76,8 +76,15 @@ export function StatusLight({
     if (!mesh || !material) return;
     const t = clock.getElapsedTime();
 
-    // Idle bob — same as pre-B5 behavior.
-    mesh.position.y = position[1] + Math.sin(t * 1.2) * 0.05;
+    // Idle float (G3) — gentle sine on Y when the agent isn't actively running.
+    // Skipped during "running" so the emissive pulse stays the load-bearing
+    // load signal and the light doesn't visually drift while it pulses.
+    // Amplitude 5mm, frequency 0.3Hz.
+    if (effective === "running") {
+      mesh.position.y = position[1];
+    } else {
+      mesh.position.y = position[1] + Math.sin(t * Math.PI * 2 * 0.3) * 0.005;
+    }
 
     // Ease the material color toward the status target (fast so transitions
     // feel snappy but not instantaneous).

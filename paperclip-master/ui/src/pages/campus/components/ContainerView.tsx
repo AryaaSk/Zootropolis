@@ -91,25 +91,25 @@ function RoomShell({ name, active }: { name: string; active: boolean }) {
       {/* Back wall (-z) */}
       <mesh position={[0, -0.5 + wallH / 2, -half]}>
         <boxGeometry args={[inner, wallH, wallT]} />
-        <meshLambertMaterial color={palette.bone} />
+        <wallStuccoMaterial color={new Color(palette.bone)} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
       {/* Front wall (+z) */}
       <mesh position={[0, -0.5 + wallH / 2, half]}>
         <boxGeometry args={[inner, wallH, wallT]} />
-        <meshLambertMaterial color={palette.bone} />
+        <wallStuccoMaterial color={new Color(palette.bone)} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
       {/* Left wall (-x) */}
       <mesh position={[-half, -0.5 + wallH / 2, 0]}>
         <boxGeometry args={[wallT, wallH, inner]} />
-        <meshLambertMaterial color={palette.cream} />
+        <wallStuccoMaterial color={new Color(palette.cream)} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
       {/* Right wall (+x) */}
       <mesh position={[half, -0.5 + wallH / 2, 0]}>
         <boxGeometry args={[wallT, wallH, inner]} />
-        <meshLambertMaterial color={palette.cream} />
+        <wallStuccoMaterial color={new Color(palette.cream)} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
 
@@ -166,7 +166,7 @@ function BuildingShell({ name, active }: { name: string; active: boolean }) {
       {/* Tower shell (semi-transparent so stacked floors read through) */}
       <mesh position={[0, 3, 0]}>
         <boxGeometry args={[5, 7, 5]} />
-        <meshLambertMaterial color={palette.bone} transparent opacity={0.25} />
+        <wallStuccoMaterial color={new Color(palette.bone)} uOpacity={0.35} transparent />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
       <Text
@@ -190,7 +190,10 @@ function CampusShell({ name, active }: { name: string; active: boolean }) {
     <group>
       <mesh position={[0, -0.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[40, 40]} />
-        <meshLambertMaterial color={palette.ground} />
+        <grassMaterial
+          colorA={new Color(palette.grassLight)}
+          colorB={new Color(palette.grassDark)}
+        />
       </mesh>
       <Text
         position={[0, -0.49, 18]}

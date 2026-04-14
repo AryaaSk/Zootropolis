@@ -28,6 +28,23 @@ interface AnimalProps {
 const PULSE_PEAK = 1.15;
 const PULSE_DURATION_S = 0.6;
 
+// Idle bob (G3): low-amplitude sine on Y so the animal feels alive without
+// competing with the heartbeat pulse. 1cm at ~0.5Hz. Phase is deterministic
+// per agent so a herd doesn't bob in unison.
+const BOB_AMPLITUDE = 0.01;
+const BOB_FREQ_HZ = 0.5;
+
+// Cheap deterministic phase in [0, 2π) from a string id.
+function hashPhase(id: string | undefined): number {
+  if (!id) return 0;
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) / 0xffffffff) * Math.PI * 2;
+}
+
 /**
  * Cube-animal primitive.
  * Simple body cube + small head cube + 2 eye dots. Flat Lambert + outlines.
@@ -41,6 +58,9 @@ export function Animal({
 }: AnimalProps) {
   const groupRef = useRef<Group>(null);
   const { status, pulseKey } = useAgentLiveStatus(agentId);
+  const bobPhaseRef = useRef(hashPhase(agentId));
+  const baseYRef = useRef(position[1]);
+  baseYRef.current = position[1];
 
   // Pulse state is intentionally kept out of React: bump a ref on pulseKey
   // change, then interpolate inside useFrame. Avoids per-frame re-renders
@@ -54,13 +74,14 @@ export function Animal({
     }
   }, [pulseKey]);
 
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     const group = groupRef.current;
     if (!group) return;
 
     // Compute the one-shot pulse scale target. Triangular envelope: 0→peak
     // in half the duration, peak→0 in the other half.
     let targetScale = 1;
+    let pulseLift = 0;
     if (pulseStartRef.current !== null) {
       const now = performance.now() / 1000;
       const t = (now - pulseStartRef.current) / PULSE_DURATION_S;
@@ -69,6 +90,8 @@ export function Animal({
       } else {
         const tri = t < 0.5 ? t * 2 : (1 - t) * 2;
         targetScale = 1 + (PULSE_PEAK - 1) * tri;
+        // Small lift synced to the scale pulse so the animal gently hops.
+        pulseLift = tri * 0.04;
       }
     }
 
@@ -76,6 +99,14 @@ export function Animal({
     damp(group.scale, "x", targetScale, 0.08, delta);
     damp(group.scale, "y", targetScale, 0.08, delta);
     damp(group.scale, "z", targetScale, 0.08, delta);
+
+    // Idle bob — sine on Y, additive with the pulse lift. Hashed phase
+    // keeps a roomful of animals from bobbing in unison.
+    const t = clock.getElapsedTime();
+    const bob =
+      BOB_AMPLITUDE *
+      Math.sin(t * Math.PI * 2 * BOB_FREQ_HZ + bobPhaseRef.current);
+    group.position.y = baseYRef.current + bob + pulseLift;
   });
 
   const renderStatusLight = showStatusLight ?? !!agentId;
