@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { Agent, Issue, LiveEvent } from "@paperclipai/shared";
 import type { RunForIssue } from "../api/activity";
@@ -708,6 +708,35 @@ function closeSocketQuietly(target: LiveUpdatesSocketLike | null, reason: string
   }
 }
 
+// ---------------------------------------------------------------------------
+// Subscription API (Zootropolis B5)
+// ---------------------------------------------------------------------------
+// Other parts of the UI (e.g., the /campus 3D scene) need to react to live
+// events without opening their own WebSocket. We expose a simple pub/sub
+// bound to the existing provider-owned socket: subscribers receive every
+// LiveEvent as it arrives, after the provider's own handling runs.
+
+export type LiveEventSubscriber = (event: LiveEvent) => void;
+
+interface LiveUpdatesSubscriptionContextValue {
+  subscribe: (fn: LiveEventSubscriber) => () => void;
+}
+
+const LiveUpdatesSubscriptionContext =
+  createContext<LiveUpdatesSubscriptionContextValue | null>(null);
+
+export function useLiveEventSubscription(fn: LiveEventSubscriber) {
+  const ctx = useContext(LiveUpdatesSubscriptionContext);
+  const fnRef = useRef(fn);
+  useEffect(() => {
+    fnRef.current = fn;
+  }, [fn]);
+  useEffect(() => {
+    if (!ctx) return;
+    return ctx.subscribe((event) => fnRef.current(event));
+  }, [ctx]);
+}
+
 export const __liveUpdatesTestUtils = {
   buildAgentStatusToast,
   buildRunStatusToast,
@@ -739,6 +768,18 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
     userId: currentUserId,
     agentId: null,
   });
+  const subscribersRef = useRef<Set<LiveEventSubscriber>>(new Set());
+  const subscriptionContextValue = useMemo<LiveUpdatesSubscriptionContextValue>(
+    () => ({
+      subscribe(fn) {
+        subscribersRef.current.add(fn);
+        return () => {
+          subscribersRef.current.delete(fn);
+        };
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     pathnameRef.current = location.pathname;
@@ -804,6 +845,16 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
             userId: currentActorRef.current.userId,
             agentId: currentActorRef.current.agentId,
           });
+          // Fan out to external subscribers (e.g., /campus 3D scene).
+          if (parsed.companyId === liveCompanyId) {
+            for (const fn of subscribersRef.current) {
+              try {
+                fn(parsed);
+              } catch {
+                // subscriber error must not break the socket
+              }
+            }
+          }
         } catch {
           // Ignore non-JSON payloads.
         }
@@ -837,5 +888,9 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
     };
   }, [queryClient, liveCompanyId, pushToast, canConnectSocket, socketAuthKey]);
 
-  return <>{children}</>;
+  return (
+    <LiveUpdatesSubscriptionContext.Provider value={subscriptionContextValue}>
+      {children}
+    </LiveUpdatesSubscriptionContext.Provider>
+  );
 }

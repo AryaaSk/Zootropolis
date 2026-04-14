@@ -1537,7 +1537,8 @@ export function agentRoutes(db: Db) {
       );
     }
 
-    // Zootropolis: aliaskit_vm leaves get a port + folder + daemon at hire.
+    // Zootropolis: aliaskit_vm leaves get a port + folder + daemon at hire,
+    // and an AliasKit identity (mocked in v1) materialised into the folder.
     if (agent.adapterType === "aliaskit_vm") {
       try {
         await getPortBroker(db).allocate(agent.id);
@@ -1548,6 +1549,32 @@ export function agentRoutes(db: Db) {
           `Zootropolis port broker: failed to allocate for ${agent.id}:`,
           err instanceof Error ? err.message : String(err),
         );
+      }
+      // Run the adapter's onHireApproved hook directly. In Paperclip's normal
+      // flow this fires on approval-grant; in local_trusted dev mode there's
+      // no approval, so we synthesize a "local_implicit" approval here.
+      const adapter = findActiveServerAdapter("aliaskit_vm");
+      if (adapter?.onHireApproved) {
+        try {
+          await adapter.onHireApproved(
+            {
+              companyId,
+              agentId: agent.id,
+              agentName: agent.name,
+              adapterType: "aliaskit_vm",
+              source: "approval",
+              sourceId: `local-${agent.id}`,
+              approvedAt: new Date().toISOString(),
+              message: "Local trusted hire — no human approval required.",
+            },
+            (agent.adapterConfig ?? {}) as Record<string, unknown>,
+          );
+        } catch (err) {
+          console.warn(
+            `Zootropolis: aliaskit_vm.onHireApproved failed for ${agent.id}:`,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
       }
     }
 
