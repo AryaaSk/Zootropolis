@@ -39,6 +39,13 @@ import { PluginPage } from "./pages/PluginPage";
 import { IssueChatUxLab } from "./pages/IssueChatUxLab";
 import { RunTranscriptUxLab } from "./pages/RunTranscriptUxLab";
 import { OrgChart } from "./pages/OrgChart";
+import {
+  BuildingViewPlaceholder,
+  CampusRootPlaceholder,
+  FloorViewPlaceholder,
+  RoomViewPlaceholder,
+} from "./pages/campus/Campus";
+import { AgentView } from "./pages/campus/views/AgentView";
 import { NewAgent } from "./pages/NewAgent";
 import { AuthPage } from "./pages/Auth";
 import { BoardClaimPage } from "./pages/BoardClaim";
@@ -355,6 +362,13 @@ export function App() {
           <Route path="execution-workspaces/:workspaceId/issues" element={<UnprefixedBoardRedirect />} />
           <Route path="tests/ux/chat" element={<UnprefixedBoardRedirect />} />
           <Route path="tests/ux/runs" element={<UnprefixedBoardRedirect />} />
+          <Route path="campus/:companyId">
+            <Route index element={<CampusRootPlaceholder />} />
+            <Route path="building/:id" element={<BuildingViewPlaceholder />} />
+            <Route path="floor/:id" element={<FloorViewPlaceholder />} />
+            <Route path="room/:id" element={<RoomViewPlaceholder />} />
+            <Route path="agent/:id" element={<AgentView />} />
+          </Route>
           <Route path=":companyPrefix" element={<Layout />}>
             {boardRoutes()}
           </Route>
