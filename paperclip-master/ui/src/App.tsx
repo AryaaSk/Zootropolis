@@ -3,6 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Layout } from "./components/Layout";
 import { OnboardingWizard } from "./components/OnboardingWizard";
+import { NewIssueDialog } from "./components/NewIssueDialog";
+import { NewProjectDialog } from "./components/NewProjectDialog";
+import { NewGoalDialog } from "./components/NewGoalDialog";
+import { NewAgentDialog } from "./components/NewAgentDialog";
 import { authApi } from "./api/auth";
 import { healthApi } from "./api/health";
 import { Dashboard } from "./pages/Dashboard";
@@ -374,6 +378,12 @@ export function App() {
         </Route>
       </Routes>
       <OnboardingWizard />
+      {/* Global dialogs: reachable via useDialog() from any route, including
+          /campus/* which isn't wrapped in <Layout>. Hoisted from Layout.tsx. */}
+      <NewIssueDialog />
+      <NewProjectDialog />
+      <NewGoalDialog />
+      <NewAgentDialog />
     </>
   );
 }
