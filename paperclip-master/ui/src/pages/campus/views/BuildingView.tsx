@@ -2,26 +2,23 @@ import { useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
+import type { Agent } from "@paperclipai/shared";
 import { ContainerView } from "../components/ContainerView";
+import {
+  EmptyLayerOverlay,
+  LoadingOverlay,
+  NotFoundOverlay,
+} from "../components/SceneOverlays";
+import { useContainerChildren } from "../hooks/useContainerChildren";
 import { palette } from "../palette";
 
-interface StubFloor {
-  id: string;
-  name: string;
-  y: number;
-}
-
-const STUB_FLOORS: StubFloor[] = [
-  { id: "floor-engineering", name: "Engineering", y: 0.5 },
-  { id: "floor-design", name: "Design", y: 2.5 },
-  { id: "floor-ops", name: "Operations", y: 4.5 },
-];
-
 function FloorSlabPlaceholder({
-  floor,
+  agent,
+  y,
   onClick,
 }: {
-  floor: StubFloor;
+  agent: Agent;
+  y: number;
   onClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -30,7 +27,7 @@ function FloorSlabPlaceholder({
 
   return (
     <group
-      position={[0, floor.y + lift, 0]}
+      position={[0, y + lift, 0]}
       onPointerOver={(e) => {
         e.stopPropagation();
         setHovered(true);
@@ -53,20 +50,23 @@ function FloorSlabPlaceholder({
         anchorX="center"
         anchorY="middle"
       >
-        {floor.name}
+        {agent.name}
       </Text>
     </group>
   );
 }
 
 /**
- * BuildingView — a building shell with 2–3 floor slabs stacked vertically.
- * Click → FloorView for that floor id.
+ * BuildingView — a building shell with one slab per child floor agent.
+ * Click → FloorView for that agent's id.
  */
 export function BuildingView() {
   const navigate = useNavigate();
   const { companyId, id } = useParams<{ companyId: string; id: string }>();
-  const buildingName = id ?? "HQ";
+  const { self, children, loading } = useContainerChildren(companyId ?? "", id ?? null);
+  const buildingName = self?.name ?? id ?? "Building";
+
+  const showNotFound = !loading && !!id && self === null;
 
   return (
     <div className="h-[calc(100vh-0px)] w-full">
@@ -76,13 +76,26 @@ export function BuildingView() {
         <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
         <ContainerView layer="building" name={buildingName}>
-          {STUB_FLOORS.map((floor) => (
-            <FloorSlabPlaceholder
-              key={floor.id}
-              floor={floor}
-              onClick={() => navigate(`/campus/${companyId}/floor/${floor.id}`)}
+          {loading ? (
+            <LoadingOverlay />
+          ) : showNotFound ? (
+            <NotFoundOverlay
+              layer="building"
+              backHref={`/campus/${companyId}`}
+              backLabel="campus"
             />
-          ))}
+          ) : children.length === 0 ? (
+            <EmptyLayerOverlay layer="building" />
+          ) : (
+            children.map((agent, i) => (
+              <FloorSlabPlaceholder
+                key={agent.id}
+                agent={agent}
+                y={0.5 + i * 2}
+                onClick={() => navigate(`/campus/${companyId}/floor/${agent.id}`)}
+              />
+            ))
+          )}
         </ContainerView>
 
         <OrbitControls

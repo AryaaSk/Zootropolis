@@ -2,16 +2,37 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import { useParams } from "@/lib/router";
 import { Animal } from "../components/Animal";
+import {
+  LoadingOverlay,
+  NotFoundOverlay,
+} from "../components/SceneOverlays";
 import { StatusLight } from "../components/StatusLight";
+import {
+  pickAnimalPaletteKey,
+  useContainerChildren,
+} from "../hooks/useContainerChildren";
 import { palette } from "../palette";
 
 /**
  * AgentView — single-leaf-agent R3F scene.
- * B1: hardcoded stub. Real Paperclip data comes in B4.
+ * Pulls the agent's display name (and color) from Paperclip's agents list so
+ * the label reflects the real name rather than the URL :id.
  */
 export function AgentView() {
-  const { id } = useParams<{ id: string }>();
-  const label = id ?? "test-agent";
+  const { companyId, id } = useParams<{ companyId: string; id: string }>();
+  const { self, parent, loading } = useContainerChildren(
+    companyId ?? "",
+    id ?? null,
+  );
+
+  const showNotFound = !loading && !!id && self === null;
+  const label = self?.name ?? id ?? "agent";
+  const color = id ? palette[pickAnimalPaletteKey(id)] : palette.terracotta;
+
+  const backHref = parent
+    ? `/campus/${companyId}/room/${parent.id}`
+    : `/campus/${companyId}`;
+  const backLabel = parent ? "room" : "campus";
 
   return (
     <div className="h-[calc(100vh-0px)] w-full">
@@ -31,19 +52,26 @@ export function AgentView() {
           <meshLambertMaterial color={palette.ground} />
         </mesh>
 
-        <Animal />
-        <StatusLight mode="idle" />
-
-        <Text
-          position={[0, -0.9, 1.2]}
-          rotation={[-Math.PI / 6, 0, 0]}
-          fontSize={0.24}
-          color={palette.ink}
-          anchorX="center"
-          anchorY="middle"
-        >
-          {label}
-        </Text>
+        {loading ? (
+          <LoadingOverlay />
+        ) : showNotFound ? (
+          <NotFoundOverlay layer="agent" backHref={backHref} backLabel={backLabel} />
+        ) : (
+          <>
+            <Animal color={color} />
+            <StatusLight mode="idle" />
+            <Text
+              position={[0, -0.9, 1.2]}
+              rotation={[-Math.PI / 6, 0, 0]}
+              fontSize={0.24}
+              color={palette.ink}
+              anchorX="center"
+              anchorY="middle"
+            >
+              {label}
+            </Text>
+          </>
+        )}
 
         <OrbitControls
           enablePan={false}

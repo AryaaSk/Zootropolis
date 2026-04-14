@@ -2,31 +2,35 @@ import { useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
+import type { Agent } from "@paperclipai/shared";
 import { ContainerView } from "../components/ContainerView";
+import {
+  EmptyLayerOverlay,
+  LoadingOverlay,
+  NotFoundOverlay,
+} from "../components/SceneOverlays";
+import { useContainerChildren } from "../hooks/useContainerChildren";
 import { palette } from "../palette";
 
-interface StubRoom {
-  id: string;
-  name: string;
-  position: [number, number, number];
+/** Lay out N rooms on a single-row grid centered on the slab. */
+function roomPosition(index: number, total: number): [number, number, number] {
+  const spacing = 3.5;
+  const x = (index - (total - 1) / 2) * spacing;
+  return [x, 0, 0];
 }
 
-const STUB_ROOMS: StubRoom[] = [
-  { id: "room-backend", name: "Backend", position: [-3.5, 0, 0] },
-  { id: "room-frontend", name: "Frontend", position: [0, 0, 0] },
-  { id: "room-platform", name: "Platform", position: [3.5, 0, 0] },
-];
-
 function RoomPlaceholder({
-  room,
+  agent,
+  position,
   onClick,
 }: {
-  room: StubRoom;
+  agent: Agent;
+  position: [number, number, number];
   onClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
-  const [x, y, z] = room.position;
+  const [x, y, z] = position;
   const lift = hovered ? 0.15 : 0;
 
   return (
@@ -62,20 +66,30 @@ function RoomPlaceholder({
         anchorX="center"
         anchorY="middle"
       >
-        {room.name}
+        {agent.name}
       </Text>
     </group>
   );
 }
 
 /**
- * FloorView — a floor slab with 2–3 room placeholders in a grid.
- * Click → RoomView for that room id.
+ * FloorView — a floor slab with one room per child agent.
+ * Click → RoomView for that agent's id.
  */
 export function FloorView() {
   const navigate = useNavigate();
   const { companyId, id } = useParams<{ companyId: string; id: string }>();
-  const floorName = id ?? "Engineering";
+  const { self, parent, children, loading } = useContainerChildren(
+    companyId ?? "",
+    id ?? null,
+  );
+  const floorName = self?.name ?? id ?? "Floor";
+
+  const showNotFound = !loading && !!id && self === null;
+  const backHref = parent
+    ? `/campus/${companyId}/building/${parent.id}`
+    : `/campus/${companyId}`;
+  const backLabel = parent ? "building" : "campus";
 
   return (
     <div className="h-[calc(100vh-0px)] w-full">
@@ -85,13 +99,22 @@ export function FloorView() {
         <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
         <ContainerView layer="floor" name={floorName}>
-          {STUB_ROOMS.map((room) => (
-            <RoomPlaceholder
-              key={room.id}
-              room={room}
-              onClick={() => navigate(`/campus/${companyId}/room/${room.id}`)}
-            />
-          ))}
+          {loading ? (
+            <LoadingOverlay />
+          ) : showNotFound ? (
+            <NotFoundOverlay layer="floor" backHref={backHref} backLabel={backLabel} />
+          ) : children.length === 0 ? (
+            <EmptyLayerOverlay layer="floor" />
+          ) : (
+            children.map((agent, i) => (
+              <RoomPlaceholder
+                key={agent.id}
+                agent={agent}
+                position={roomPosition(i, children.length)}
+                onClick={() => navigate(`/campus/${companyId}/room/${agent.id}`)}
+              />
+            ))
+          )}
         </ContainerView>
 
         <OrbitControls

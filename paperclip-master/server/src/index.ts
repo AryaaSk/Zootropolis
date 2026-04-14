@@ -689,6 +689,12 @@ export async function startServer(): Promise<StartedServer> {
     server.listen(listenPort, config.host, () => {
       server.off("error", onError);
       logger.info(`Server listening on ${config.host}:${listenPort}`);
+      // Zootropolis: respawn agent-runtime daemons for any aliaskit_vm
+      // leaves that survived the last shutdown. Idempotent — uses each
+      // agent's previously-stored port if still in range.
+      void import("./services/port-broker.js")
+        .then(({ getPortBroker }) => getPortBroker(db as any).reconcile())
+        .catch((err) => logger.warn({ err }, "Zootropolis port broker reconcile failed"));
       if (process.env.PAPERCLIP_OPEN_ON_LISTEN === "true") {
         const openHost = config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host;
         const url = `http://${openHost}:${listenPort}`;

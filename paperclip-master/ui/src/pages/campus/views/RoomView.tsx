@@ -2,35 +2,41 @@ import { useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
+import type { Agent } from "@paperclipai/shared";
 import { Animal } from "../components/Animal";
 import { ContainerView } from "../components/ContainerView";
+import {
+  EmptyLayerOverlay,
+  LoadingOverlay,
+  NotFoundOverlay,
+} from "../components/SceneOverlays";
+import {
+  pickAnimalPaletteKey,
+  useContainerChildren,
+} from "../hooks/useContainerChildren";
 import { palette } from "../palette";
 
-interface StubAnimal {
-  id: string;
-  name: string;
-  color: string;
-  position: [number, number, number];
+/** Lay out N animals in a single row across the room floor. */
+function animalPosition(index: number, total: number): [number, number, number] {
+  const spacing = 1.8;
+  const x = (index - (total - 1) / 2) * spacing;
+  return [x, 0, 0];
 }
 
-// Hardcoded children. Real Paperclip data lands in B4.
-const STUB_ANIMALS: StubAnimal[] = [
-  { id: "agent-stub-1", name: "BackendWorker-1", color: palette.terracotta, position: [-1.8, 0, 0] },
-  { id: "agent-stub-2", name: "BackendWorker-2", color: palette.clay, position: [0, 0, 0] },
-  { id: "agent-stub-3", name: "BackendWorker-3", color: palette.deepBlue, position: [1.8, 0, 0] },
-];
-
 function ClickableAnimal({
-  animal,
+  agent,
+  position,
   onClick,
 }: {
-  animal: StubAnimal;
+  agent: Agent;
+  position: [number, number, number];
   onClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
-  const [x, y, z] = animal.position;
+  const [x, y, z] = position;
   const lift = hovered ? 0.2 : 0;
+  const color = palette[pickAnimalPaletteKey(agent.id)];
 
   return (
     <group
@@ -45,7 +51,7 @@ function ClickableAnimal({
         onClick();
       }}
     >
-      <Animal color={animal.color} />
+      <Animal color={color} />
       <Text
         position={[0, -0.45, 1.2]}
         rotation={[-Math.PI / 6, 0, 0]}
@@ -54,20 +60,30 @@ function ClickableAnimal({
         anchorX="center"
         anchorY="middle"
       >
-        {animal.name}
+        {agent.name}
       </Text>
     </group>
   );
 }
 
 /**
- * RoomView — a room shell with 3 stubbed animals on a grid.
- * Click an animal → AgentView for that stub id.
+ * RoomView — a room shell with one animal per leaf-agent child.
+ * Click an animal → AgentView for that agent id.
  */
 export function RoomView() {
   const navigate = useNavigate();
   const { companyId, id } = useParams<{ companyId: string; id: string }>();
-  const roomName = id ?? "Backend";
+  const { self, parent, children, loading } = useContainerChildren(
+    companyId ?? "",
+    id ?? null,
+  );
+  const roomName = self?.name ?? id ?? "Room";
+
+  const showNotFound = !loading && !!id && self === null;
+  const backHref = parent
+    ? `/campus/${companyId}/floor/${parent.id}`
+    : `/campus/${companyId}`;
+  const backLabel = parent ? "floor" : "campus";
 
   return (
     <div className="h-[calc(100vh-0px)] w-full">
@@ -77,13 +93,22 @@ export function RoomView() {
         <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
         <ContainerView layer="room" name={roomName}>
-          {STUB_ANIMALS.map((animal) => (
-            <ClickableAnimal
-              key={animal.id}
-              animal={animal}
-              onClick={() => navigate(`/campus/${companyId}/agent/${animal.id}`)}
-            />
-          ))}
+          {loading ? (
+            <LoadingOverlay />
+          ) : showNotFound ? (
+            <NotFoundOverlay layer="room" backHref={backHref} backLabel={backLabel} />
+          ) : children.length === 0 ? (
+            <EmptyLayerOverlay layer="room" />
+          ) : (
+            children.map((agent, i) => (
+              <ClickableAnimal
+                key={agent.id}
+                agent={agent}
+                position={animalPosition(i, children.length)}
+                onClick={() => navigate(`/campus/${companyId}/agent/${agent.id}`)}
+              />
+            ))
+          )}
         </ContainerView>
 
         <OrbitControls

@@ -2,31 +2,36 @@ import { useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
+import type { Agent } from "@paperclipai/shared";
 import { ContainerView } from "../components/ContainerView";
+import { EmptyLayerOverlay, LoadingOverlay } from "../components/SceneOverlays";
+import { useContainerChildren } from "../hooks/useContainerChildren";
 import { palette } from "../palette";
 
-interface StubBuilding {
-  id: string;
-  name: string;
-  position: [number, number, number];
+/** Lay out N buildings on a loose grid centered at the origin. */
+function buildingPosition(index: number, total: number): [number, number, number] {
+  const cols = Math.max(1, Math.ceil(Math.sqrt(total)));
+  const spacing = 7;
+  const col = index % cols;
+  const row = Math.floor(index / cols);
+  const rows = Math.max(1, Math.ceil(total / cols));
+  const x = (col - (cols - 1) / 2) * spacing;
+  const z = (row - (rows - 1) / 2) * spacing;
+  return [x, 0, z];
 }
 
-const STUB_BUILDINGS: StubBuilding[] = [
-  { id: "building-hq", name: "HQ", position: [-7, 0, -2] },
-  { id: "building-engineering", name: "Engineering", position: [0, 0, 0] },
-  { id: "building-research", name: "Research", position: [7, 0, 2] },
-];
-
 function BuildingPlaceholder({
-  building,
+  agent,
+  position,
   onClick,
 }: {
-  building: StubBuilding;
+  agent: Agent;
+  position: [number, number, number];
   onClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
-  const [x, y, z] = building.position;
+  const [x, y, z] = position;
   const lift = hovered ? 0.2 : 0;
 
   return (
@@ -62,19 +67,20 @@ function BuildingPlaceholder({
         anchorX="center"
         anchorY="middle"
       >
-        {building.name}
+        {agent.name}
       </Text>
     </group>
   );
 }
 
 /**
- * CampusView — a ground plane with 2–3 buildings on a grid.
- * Click → BuildingView for that building id.
+ * CampusView — a ground plane with one building per campus-layer root agent.
+ * Click → BuildingView for that agent's id.
  */
 export function CampusView() {
   const navigate = useNavigate();
   const { companyId } = useParams<{ companyId: string }>();
+  const { children, loading } = useContainerChildren(companyId ?? "", null);
   const campusName = companyId ?? "Zootropolis";
 
   return (
@@ -85,13 +91,20 @@ export function CampusView() {
         <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
         <ContainerView layer="campus" name={campusName}>
-          {STUB_BUILDINGS.map((building) => (
-            <BuildingPlaceholder
-              key={building.id}
-              building={building}
-              onClick={() => navigate(`/campus/${companyId}/building/${building.id}`)}
-            />
-          ))}
+          {loading ? (
+            <LoadingOverlay />
+          ) : children.length === 0 ? (
+            <EmptyLayerOverlay layer="campus" />
+          ) : (
+            children.map((agent, i) => (
+              <BuildingPlaceholder
+                key={agent.id}
+                agent={agent}
+                position={buildingPosition(i, children.length)}
+                onClick={() => navigate(`/campus/${companyId}/building/${agent.id}`)}
+              />
+            ))
+          )}
         </ContainerView>
 
         <OrbitControls

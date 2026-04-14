@@ -536,6 +536,9 @@ importers:
       '@paperclipai/adapter-utils':
         specifier: workspace:*
         version: link:../packages/adapter-utils
+      '@paperclipai/agent-runtime':
+        specifier: workspace:*
+        version: link:../packages/agent-runtime
       '@paperclipai/db':
         specifier: workspace:*
         version: link:../packages/db

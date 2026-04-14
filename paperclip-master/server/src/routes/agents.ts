@@ -36,6 +36,7 @@ import {
   approvalService,
   companySkillService,
   budgetService,
+  getPortBroker,
   heartbeatService,
   issueApprovalService,
   issueService,
@@ -1536,6 +1537,20 @@ export function agentRoutes(db: Db) {
       );
     }
 
+    // Zootropolis: aliaskit_vm leaves get a port + folder + daemon at hire.
+    if (agent.adapterType === "aliaskit_vm") {
+      try {
+        await getPortBroker(db).allocate(agent.id);
+      } catch (err) {
+        // Don't block the create; broker errors shouldn't 500 the request.
+        // The adapter test endpoint will surface the bad runtime endpoint.
+        console.warn(
+          `Zootropolis port broker: failed to allocate for ${agent.id}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
     res.status(201).json(agent);
   });
 
@@ -2033,6 +2048,18 @@ export function agentRoutes(db: Db) {
     if (!agent) {
       res.status(404).json({ error: "Agent not found" });
       return;
+    }
+
+    // Zootropolis: tear down the daemon + free the port for aliaskit_vm leaves.
+    if (agent.adapterType === "aliaskit_vm") {
+      try {
+        await getPortBroker(db).release(agent.id);
+      } catch (err) {
+        console.warn(
+          `Zootropolis port broker: failed to release for ${agent.id}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
 
     await logActivity(db, {
