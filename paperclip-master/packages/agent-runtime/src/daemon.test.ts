@@ -83,17 +83,18 @@ describe("agent-runtime daemon", () => {
       expect(final.ok).toBe(true);
     });
 
-    // CLAUDE.md, memory.md, identity.json should now exist
+    // CLAUDE.md + memory.md should now exist. identity.json is NOT
+    // seeded locally anymore (Phase L1) — it's fetched via Paperclip's
+    // identity API.
     const claudeMd = await readFile(join(folder, "CLAUDE.md"), "utf8");
     expect(claudeMd).toContain("test-agent");
     const memoryMd = await readFile(join(folder, "memory.md"), "utf8");
     expect(memoryMd).toContain("test-agent");
-    const identity = JSON.parse(await readFile(join(folder, "identity.json"), "utf8"));
-    expect(identity).toHaveProperty("note");
-    // Phase D2: the Zootropolis Paperclip skill should be copied into
-    // skills/ on first execute, defining the close-marker contract.
+    // Phase L3: the Zootropolis Paperclip skill lands at
+    // .claude/skills/zootropolis-paperclip/SKILL.md per Claude Code's
+    // per-project skill-discovery convention.
     const skill = await readFile(
-      join(folder, "skills", "zootropolis-paperclip.md"),
+      join(folder, ".claude", "skills", "zootropolis-paperclip", "SKILL.md"),
       "utf8",
     );
     expect(skill).toContain("zootropolis");

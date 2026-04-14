@@ -63,14 +63,6 @@ work, learnings, and ongoing context. Claude's session cache (.claude/) is
 short-term conversation; this is your long-term notebook.
 `;
 
-const DEFAULT_IDENTITY: Record<string, unknown> = {
-  email: null,
-  phone: null,
-  card: null,
-  totpSecret: null,
-  note: "Identity not yet provisioned. Phase A6 fills this in via aliaskit-vm.onHireApproved.",
-};
-
 /**
  * Bootstrap a fresh agent folder on first execute. Idempotent: if the folder
  * already has a .claude/ directory we assume it's been bootstrapped and skip.
@@ -92,17 +84,16 @@ export async function ensureFolderBootstrapped(folder: string, agentId: string):
   await Promise.all([
     mkdir(claudeDir, { recursive: true }),
     mkdir(join(folder, "workspace"), { recursive: true }),
-    mkdir(join(folder, "skills"), { recursive: true }),
   ]);
 
   const claudeMd = CLAUDE_MD_TEMPLATE.replace("{agentId}", agentId);
   const memoryMd = MEMORY_MD_TEMPLATE.replace("{agentId}", agentId);
+  // identity.json is no longer seeded on disk — external daemons fetch it
+  // from Paperclip's GET /api/companies/:companyId/agents/:id/identity.
+  // See docs/agent-runtime-contract.md §Identity.
   await Promise.all([
     writeFile(join(folder, "CLAUDE.md"), claudeMd, { flag: "wx" }).catch(() => {}),
     writeFile(join(folder, "memory.md"), memoryMd, { flag: "wx" }).catch(() => {}),
-    writeFile(join(folder, "identity.json"), JSON.stringify(DEFAULT_IDENTITY, null, 2) + "\n", {
-      flag: "wx",
-    }).catch(() => {}),
     copyZootropolisPaperclipSkill(folder).catch(() => {}),
   ]);
 }
@@ -127,9 +118,13 @@ async function copyZootropolisPaperclipSkill(folder: string): Promise<void> {
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
       const contents = await readFile(candidate, "utf8");
-      await writeFile(join(folder, "skills", "zootropolis-paperclip.md"), contents, {
-        flag: "wx",
-      });
+      // Claude Code convention: per-project skills live at
+      // <cwd>/.claude/skills/<skill-name>/SKILL.md so the CLI's skill
+      // discovery picks them up automatically. A plain skills/foo.md at
+      // the project root is NOT discovered.
+      const skillDir = join(folder, ".claude", "skills", "zootropolis-paperclip");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(join(skillDir, "SKILL.md"), contents, { flag: "wx" });
       return;
     }
   }
