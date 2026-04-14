@@ -39,13 +39,11 @@ import { PluginPage } from "./pages/PluginPage";
 import { IssueChatUxLab } from "./pages/IssueChatUxLab";
 import { RunTranscriptUxLab } from "./pages/RunTranscriptUxLab";
 import { OrgChart } from "./pages/OrgChart";
-import {
-  BuildingViewPlaceholder,
-  CampusRootPlaceholder,
-  FloorViewPlaceholder,
-  RoomViewPlaceholder,
-} from "./pages/campus/Campus";
 import { AgentView } from "./pages/campus/views/AgentView";
+import { RoomView } from "./pages/campus/views/RoomView";
+import { FloorView } from "./pages/campus/views/FloorView";
+import { BuildingView } from "./pages/campus/views/BuildingView";
+import { CampusView } from "./pages/campus/views/CampusView";
 import { NewAgent } from "./pages/NewAgent";
 import { AuthPage } from "./pages/Auth";
 import { BoardClaimPage } from "./pages/BoardClaim";
@@ -363,10 +361,10 @@ export function App() {
           <Route path="tests/ux/chat" element={<UnprefixedBoardRedirect />} />
           <Route path="tests/ux/runs" element={<UnprefixedBoardRedirect />} />
           <Route path="campus/:companyId">
-            <Route index element={<CampusRootPlaceholder />} />
-            <Route path="building/:id" element={<BuildingViewPlaceholder />} />
-            <Route path="floor/:id" element={<FloorViewPlaceholder />} />
-            <Route path="room/:id" element={<RoomViewPlaceholder />} />
+            <Route index element={<CampusView />} />
+            <Route path="building/:id" element={<BuildingView />} />
+            <Route path="floor/:id" element={<FloorView />} />
+            <Route path="room/:id" element={<RoomView />} />
             <Route path="agent/:id" element={<AgentView />} />
           </Route>
           <Route path=":companyPrefix" element={<Layout />}>
