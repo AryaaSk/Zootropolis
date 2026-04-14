@@ -44,21 +44,80 @@ as the **last line of your stdout**:
 {"zootropolis":{"action":"close","status":"done","summary":"<one line>","artifact":"<full markdown deliverable>"}}
 ```
 
-Fields:
+### Artifact is MANDATORY
+
+Zootropolis treats issues as **messages between agents**, not just as
+tracking tickets. An issue closed without an artifact is a message with
+an empty body — it tells your parent absolutely nothing about what you
+did, what you found, or how you decided. That's useless at best and
+actively misleading at worst (they can't distinguish "the work completed"
+from "the agent gave up silently").
+
+**The server will hard-reject a close marker with empty or missing
+`artifact`.** The issue will NOT transition to done; instead a violation
+comment will be posted on the issue, and you'll be woken again with
+that comment in your history. Eventually a human may audit your behaviour
+if you keep doing it.
+
+So: always fill in `artifact`. If the task was truly trivial ("ack the
+ping"), still write a one-line artifact:
+
+```json
+{"zootropolis":{"action":"close","status":"done","summary":"Pinged back.","artifact":"Acknowledged. No follow-up action."}}
+```
+
+If you have a legitimate reason NOT to complete the task (impossible,
+out of scope, dependency missing), use `status: "cancelled"` and still
+fill in artifact explaining WHY:
+
+```json
+{"zootropolis":{"action":"close","status":"cancelled","summary":"Can't research octopuses without internet access","artifact":"# Blocked\n\nMy AliasKit identity has no network egress configured on this daemon host. The task requires live web lookups. Suggest retrying on an agent with internet access, or providing research material in the issue description."}}
+```
+
+### Field meanings
 
 - **action**: always `"close"`.
 - **status**: `"done"` (default — task succeeded) or `"cancelled"` (you
   decided this task should not be done; explain in the artifact).
 - **summary**: ≤500 chars; one-line description of the result. Shown in
-  the issue list.
-- **artifact**: the full deliverable, in Markdown. Becomes the issue's
-  closing comment — and per Zootropolis design, the issue itself IS the
-  artifact. Don't write deliverables to loose files in `workspace/` and
-  call the task done; write them here.
+  the issue list. Required.
+- **artifact**: the full deliverable, in Markdown. **Required.** Becomes
+  the issue's closing comment — and per Zootropolis design, the issue
+  itself IS the artifact. Don't write deliverables to loose files in
+  `workspace/` and call the task done; write them here.
 
-If you don't emit this marker, the issue stays open and your stdout-tail
-becomes a comment but doesn't transition the issue. That's the safety
-default — only close issues when you're actually done.
+### Bad patterns — do not do this
+
+**Empty artifact** — hard-rejected:
+
+```json
+// ❌ WILL BE REJECTED
+{"zootropolis":{"action":"close","status":"done","summary":"done"}}
+{"zootropolis":{"action":"close","status":"done","summary":"done","artifact":""}}
+{"zootropolis":{"action":"close","status":"done","summary":"done","artifact":"   "}}
+```
+
+**Marker in the middle of stdout** — the server parses only the LAST
+JSON-shaped line. Everything after is ignored:
+
+```text
+// ❌ This emits a marker, then prints more text. The marker is invisible.
+{"zootropolis":{"action":"close","status":"done","summary":"ok","artifact":"..."}}
+Thanks, bye!
+```
+
+Emit the marker LAST. Don't print anything after it.
+
+**Multiple markers** — only the last is parsed. Don't accumulate
+drafts:
+
+```text
+// ❌ Only the second will be parsed, ignoring the first.
+{"zootropolis":{"action":"close","status":"done","summary":"draft","artifact":"rough"}}
+{"zootropolis":{"action":"close","status":"done","summary":"final","artifact":"# Final result\n..."}}
+```
+
+Write one, at the end.
 
 ## How you delegate (only matters if you're a manager)
 
@@ -89,6 +148,9 @@ form your direct report can act on; don't just forward verbatim.
 
 When all of your delegated child issues close, decide what summary to
 report to YOUR parent (via the closing marker on your own assigned issue).
+**The same artifact-required rule applies to your close**: your parent
+needs to know what you accomplished, distilled from your children's
+closes.
 
 ## How memory works
 
@@ -108,30 +170,36 @@ ongoing context about your work, use `memory.md`.
 ## Files in your folder
 
 ```
-.claude/         Claude's own session cache — managed by Claude CLI
-workspace/       Files you create while working. Intermediate, NOT durable.
-skills/          Skills you can use. This file lives here.
-CLAUDE.md        Your role + delegation rules. Re-read at the start of each task.
-memory.md        Your durable notebook.
-identity.json    Your AliasKit identity (email/phone/card/TOTP).
+.claude/
+  sessions/    Claude's own session cache — managed by Claude CLI
+  skills/zootropolis-paperclip/SKILL.md   This file.
+workspace/     Files you create while working. Intermediate, NOT durable.
+CLAUDE.md      Your role + delegation rules. Re-read at the start of each task.
+memory.md      Your durable notebook.
 ```
 
 ## Identity
 
 If you need to interact with the internet (sign up for a service, receive
-a verification code, etc.), use the credentials in `identity.json`. They
-are real* (* well, mocked in v1 — you'll see `zootropolis-mock.local`
-addresses). Treat them as your own. Don't share them.
+a verification code, etc.), your credentials are injected as environment
+variables by the daemon at wake time:
+
+- `$ZOOTROPOLIS_EMAIL`
+- `$ZOOTROPOLIS_PHONE`
+- `$ZOOTROPOLIS_CARD_NUMBER`, `$ZOOTROPOLIS_CARD_EXP`, `$ZOOTROPOLIS_CARD_CVV`
+- `$ZOOTROPOLIS_TOTP_SECRET`
+
+They are managed by Paperclip (mocked in v1 — the email ends in
+`zootropolis-mock.local`). Treat them as your own. Don't try to modify them.
 
 ## Things to avoid
 
+- **Don't close without an artifact.** Server will reject.
 - **Don't write deliverables to loose files** in `workspace/`. Use the
-  closing marker artifact. `workspace/` is for intermediate scratch.
+  closing artifact. `workspace/` is for intermediate scratch.
 - **Don't emit multiple JSON objects on your last line.** The runtime
-  parses the LAST JSON-shaped line; if there are several, only the very
-  last is examined.
+  parses the LAST JSON-shaped line.
 - **Don't call the Paperclip API as if you were anyone else.** Your agent
-  identity is implicit in your runtime authentication — you can only
-  create/comment as yourself.
+  identity is implicit in your runtime authentication.
 - **Don't try to skip layers in delegation.** The server will reject it
   and you'll waste the round-trip.

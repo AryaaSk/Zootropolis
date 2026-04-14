@@ -1558,23 +1558,11 @@ export function agentRoutes(db: Db) {
       // Canonicalise: both fields carry the URL; the adapter reads runtimeEndpoint.
       requestedAdapterConfig.externalEndpoint = endpoint;
       requestedAdapterConfig.runtimeEndpoint = endpoint;
-
-      // Phase L (v1.2): mint a mock AliasKit identity now and stash it on
-      // the agent's metadata. External daemons fetch this via
-      // GET /api/companies/:id/agents/:id/identity — no filesystem writes.
-      const existingMeta = (createInput.metadata as Record<string, unknown> | null) ?? {};
-      const existingZ = (existingMeta.zootropolis as Record<string, unknown> | null) ?? {};
-      const existingAliaskit = existingZ.aliaskit;
-      if (!existingAliaskit) {
-        const identity = mockIdentityFor("pending"); // agentId is minted by svc.create; re-slug below
-        (createInput as { metadata?: Record<string, unknown> }).metadata = {
-          ...existingMeta,
-          zootropolis: {
-            ...existingZ,
-            aliaskit: identity,
-          },
-        };
-      }
+      // Note: we used to mint a mock AliasKit identity here pre-create,
+      // but the slug has to be derived from the real agentId (and/or
+      // name), neither of which exist until svc.create returns. That
+      // left every agent with `pending@zootropolis-mock.local`. Phase
+      // P4 moves the mint to AFTER svc.create (see below).
     }
     const desiredSkillAssignment = await resolveDesiredSkillAssignment(
       companyId,
@@ -1650,6 +1638,34 @@ export function agentRoutes(db: Db) {
     // Paperclip's normal flow this fires on approval-grant; in local_trusted
     // dev mode there's no approval, so we synthesize a "local_implicit" one.
     if (agent.adapterType === "aliaskit_vm") {
+      // Phase P4 — mint mock AliasKit identity using the agent's real
+      // name as the email-slug basis. Runs AFTER svc.create so the
+      // agentId exists. Skipped if metadata.zootropolis.aliaskit was
+      // already supplied in the create body (future path for
+      // pre-provisioned real identities).
+      const existingMeta = (agent.metadata as Record<string, unknown> | null) ?? {};
+      const existingZ = (existingMeta.zootropolis as Record<string, unknown> | null) ?? {};
+      if (!existingZ.aliaskit) {
+        try {
+          const identity = mockIdentityFor(agent.name || agent.id);
+          const nextMetadata = {
+            ...existingMeta,
+            zootropolis: {
+              ...existingZ,
+              aliaskit: identity,
+            },
+          };
+          await svc.update(agent.id, { metadata: nextMetadata });
+          // Reflect the write on the in-memory agent we're about to return.
+          (agent as { metadata: Record<string, unknown> | null }).metadata = nextMetadata;
+        } catch (err) {
+          console.warn(
+            `Zootropolis: failed to mint AliasKit identity for ${agent.id}:`,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      }
+
       const adapter = findActiveServerAdapter("aliaskit_vm");
       if (adapter?.onHireApproved) {
         try {

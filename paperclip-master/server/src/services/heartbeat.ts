@@ -1027,6 +1027,12 @@ async function buildPaperclipWakePayload(input: {
   }
 
   return {
+    // Phase P2 — Zootropolis rules preamble is prepended to every wake
+    // payload, regardless of adapter. Containers (claude_local, no skill
+    // file) and external leaves (which might not have re-fetched the
+    // skill file lately) both see the rules here. The external daemon's
+    // SKILL.md is a richer reference; this is the in-band reminder.
+    zootropolis: ZOOTROPOLIS_PREAMBLE,
     reason: readNonEmptyString(input.contextSnapshot.wakeReason),
     issue: issueSummary
       ? {
@@ -1051,6 +1057,31 @@ async function buildPaperclipWakePayload(input: {
     fallbackFetchNeeded: truncated || missingCommentCount > 0,
   };
 }
+
+/**
+ * Zootropolis wake-payload preamble (Phase P2).
+ * Appears in every agent's stdin JSON as the top-level `zootropolis`
+ * field. Container agents — which don't read a skill file — rely on
+ * this to learn the close-marker contract. Leaf external daemons can
+ * also fall back on it if their skills/ directory got out of sync.
+ */
+const ZOOTROPOLIS_PREAMBLE = {
+  version: 1,
+  campusRules: [
+    "You are a worker agent inside Zootropolis. Issues are not tickets; they are MESSAGES to/from your direct parent or child.",
+    "When you finish your assigned issue, emit a close marker as the LAST line of stdout:",
+    '  {"zootropolis":{"action":"close","status":"done","summary":"<one line>","artifact":"<full markdown>"}}',
+    "`artifact` is MANDATORY. The server hard-rejects close markers with empty/missing artifact; your issue stays open and you get woken again with a violation comment on the thread.",
+    "If you cannot complete the task, use status: \"cancelled\" and put the reason in artifact.",
+    "Delegation: you may only assign issues to your direct child (the agent whose reportsTo is you). Never skip-layer or sideways. Server will 409 any attempt.",
+    "Your role + full rules are in your CLAUDE.md and (for external agents) in .claude/skills/zootropolis-paperclip/SKILL.md.",
+  ],
+  closeMarkerSchema: {
+    shape: { zootropolis: { action: "close", status: "done|cancelled", summary: "string (<=500 chars, required)", artifact: "string markdown (required, non-empty)" } },
+    emitLocation: "the very last line of your stdout — nothing may follow it",
+    rejection: "close marker with empty or missing artifact is rejected server-side; the issue does NOT transition",
+  },
+} as const;
 
 function runTaskKey(run: typeof heartbeatRuns.$inferSelect) {
   return deriveTaskKey(run.contextSnapshot as Record<string, unknown> | null, null);
@@ -3485,26 +3516,60 @@ export function heartbeatService(db: Db) {
           },
         });
         if (issueId && outcome === "succeeded") {
-          // Zootropolis (Phase D1): if the agent emitted the close marker as
-          // its last stdout JSON object, prefer artifact/summary from it for
-          // the closing comment AND transition the issue to status="done".
-          // Absent or malformed marker → fall back to today's behaviour.
+          // Zootropolis (Phase D1 + P3): the agent may have emitted a close
+          // marker as its last stdout JSON object. Issues are messages; a
+          // close without an artifact is a silent shrug and is hard-rejected
+          // (the issue stays open and the agent gets woken again with a
+          // violation comment so it can try again).
           const closeMarker = readZootropolisCloseMarker(persistedResultJson);
-          try {
-            const issueComment =
-              closeMarker?.artifact
-              ?? closeMarker?.summary
-              ?? buildHeartbeatRunIssueComment(persistedResultJson);
-            if (issueComment) {
-              await issuesSvc.addComment(issueId, issueComment, { agentId: agent.id, runId: finalizedRun.id });
+          const rawArtifact = closeMarker?.artifact?.trim() ?? "";
+          const rawSummary = closeMarker?.summary?.trim() ?? "";
+          const emptyArtifactClose = closeMarker && !rawArtifact && !rawSummary;
+
+          if (emptyArtifactClose) {
+            // Phase P3 — hard reject. Post a loud violation comment but do
+            // NOT transition the issue. Paperclip's scheduler will wake
+            // the agent on the next tick; the new comment will be in its
+            // wake payload, giving it a chance to try again with a real
+            // artifact.
+            try {
+              await issuesSvc.addComment(
+                issueId,
+                "[zootropolis] Close marker rejected: `artifact` is required. " +
+                  "Issues are messages between agents — a close without an " +
+                  "artifact tells your parent nothing. See your skill " +
+                  "(`.claude/skills/zootropolis-paperclip/SKILL.md`) or the " +
+                  "`zootropolis` field in your wake payload for the contract. " +
+                  "The issue remains open; retry on your next heartbeat with " +
+                  "a non-empty artifact.",
+                { agentId: agent.id, runId: finalizedRun.id },
+              );
+            } catch (err) {
+              await onLog(
+                "stderr",
+                `[paperclip] Failed to post close-rejection comment: ${err instanceof Error ? err.message : String(err)}\n`,
+              );
             }
-          } catch (err) {
-            await onLog(
-              "stderr",
-              `[paperclip] Failed to post run summary comment: ${err instanceof Error ? err.message : String(err)}\n`,
-            );
-          }
-          if (closeMarker) {
+            await appendRunEvent(finalizedRun, seq++, {
+              eventType: "lifecycle",
+              stream: "system",
+              level: "warn",
+              message: "zootropolis: close marker rejected (empty artifact)",
+              payload: { issueId },
+            });
+          } else if (closeMarker) {
+            // Valid close — post artifact (preferred) or summary, then transition.
+            try {
+              const issueComment = rawArtifact || rawSummary;
+              if (issueComment) {
+                await issuesSvc.addComment(issueId, issueComment, { agentId: agent.id, runId: finalizedRun.id });
+              }
+            } catch (err) {
+              await onLog(
+                "stderr",
+                `[paperclip] Failed to post run summary comment: ${err instanceof Error ? err.message : String(err)}\n`,
+              );
+            }
             try {
               await issuesSvc.update(issueId, {
                 status: closeMarker.status ?? "done",
@@ -3521,6 +3586,21 @@ export function heartbeatService(db: Db) {
               await onLog(
                 "stderr",
                 `[paperclip] Zootropolis: failed to apply close marker: ${err instanceof Error ? err.message : String(err)}\n`,
+              );
+            }
+          } else {
+            // No Zootropolis marker at all — legacy Paperclip path:
+            // extract a comment from the adapter's generic result shape
+            // if one exists, but never transition the issue.
+            try {
+              const issueComment = buildHeartbeatRunIssueComment(persistedResultJson);
+              if (issueComment) {
+                await issuesSvc.addComment(issueId, issueComment, { agentId: agent.id, runId: finalizedRun.id });
+              }
+            } catch (err) {
+              await onLog(
+                "stderr",
+                `[paperclip] Failed to post run summary comment: ${err instanceof Error ? err.message : String(err)}\n`,
               );
             }
           }
