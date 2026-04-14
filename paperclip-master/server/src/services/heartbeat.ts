@@ -1067,17 +1067,49 @@ async function buildPaperclipWakePayload(input: {
  */
 const ZOOTROPOLIS_PREAMBLE = {
   version: 1,
-  campusRules: [
-    "You are a worker agent inside Zootropolis. Issues are not tickets; they are MESSAGES to/from your direct parent or child.",
+  // Rules every agent must follow to close its assigned issue. Applies to
+  // leaves and containers alike.
+  allAgents: [
+    "You are an agent inside Zootropolis. Issues are MESSAGES between agents, not tracking tickets.",
     "When you finish your assigned issue, emit a close marker as the LAST line of stdout:",
     '  {"zootropolis":{"action":"close","status":"done","summary":"<one line>","artifact":"<full markdown>"}}',
-    "`artifact` is MANDATORY. The server hard-rejects close markers with empty/missing artifact; your issue stays open and you get woken again with a violation comment on the thread.",
+    "`artifact` is MANDATORY. Empty or missing artifact is hard-rejected server-side: the issue stays open, a violation comment is posted, and you get woken again to retry.",
     "If you cannot complete the task, use status: \"cancelled\" and put the reason in artifact.",
-    "Delegation: you may only assign issues to your direct child (the agent whose reportsTo is you). Never skip-layer or sideways. Server will 409 any attempt.",
-    "Your role + full rules are in your CLAUDE.md and (for external agents) in .claude/skills/zootropolis-paperclip/SKILL.md.",
+    "Extra context: external leaves have .claude/skills/zootropolis-paperclip/SKILL.md with examples.",
   ],
+  // Rules that apply ONLY to container agents (room/floor/building/campus
+  // owners). Leaves ignore this section — they have no children to delegate
+  // to. Container agents: to split your assigned issue into sub-tasks, POST
+  // /api/companies/<companyId>/issues with assigneeAgentId set to one of
+  // your DIRECT reports (an agent whose reportsTo is you). The server
+  // returns 409 on skip-layer or sideways assignments.
+  containersOnly: {
+    applies: "agents with metadata.zootropolis.layer in room|floor|building|campus",
+    rules: [
+      "You may only assign issues to a direct report of yours.",
+      "Never skip layers. Never assign to a sibling. Server enforces with 409.",
+      "When your children's sub-issues all close, distil their artifacts into your own close artifact.",
+    ],
+    api: {
+      path: "POST /api/companies/<companyId>/issues",
+      body: {
+        title: "string",
+        description: "string",
+        assigneeAgentId: "<uuid of your direct child>",
+        createdByAgentId: "<your own uuid>",
+        parentId: "<the issue you were assigned, so lineage is preserved>",
+      },
+    },
+  },
   closeMarkerSchema: {
-    shape: { zootropolis: { action: "close", status: "done|cancelled", summary: "string (<=500 chars, required)", artifact: "string markdown (required, non-empty)" } },
+    shape: {
+      zootropolis: {
+        action: "close",
+        status: "done|cancelled",
+        summary: "string (<=500 chars, required)",
+        artifact: "string markdown (required, non-empty)",
+      },
+    },
     emitLocation: "the very last line of your stdout — nothing may follow it",
     rejection: "close marker with empty or missing artifact is rejected server-side; the issue does NOT transition",
   },
