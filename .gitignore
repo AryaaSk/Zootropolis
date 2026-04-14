@@ -1,0 +1,34 @@
+# OS
+.DS_Store
+
+# Local Paperclip data (per-instance DB, configs, secrets)
+.paperclip/
+
+# Local agent runtime folders (one per leaf agent, populated at hire)
+agents/
+
+# Node
+node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build artifacts
+dist/
+build/
+.turbo/
+.next/
+.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Env
+.env
+.env.local
+.env.*.local
