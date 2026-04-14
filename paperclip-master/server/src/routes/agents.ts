@@ -60,6 +60,7 @@ import { redactCurrentUserValue } from "../log-redaction.js";
 import { renderOrgChartSvg, renderOrgChartPng, type OrgNode, type OrgChartStyle, ORG_CHART_STYLES } from "./org-chart-svg.js";
 import { instanceSettingsService } from "../services/instance-settings.js";
 import { runClaudeLogin } from "@paperclipai/adapter-claude-local/server";
+import { mockIdentityFor } from "@paperclipai/adapter-aliaskit-vm/server";
 import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
@@ -850,6 +851,47 @@ export function agentRoutes(db: Db) {
     res.json(result);
   });
 
+  // Phase L (v1.2): external daemons fetch their AliasKit identity here
+  // on boot. Only aliaskit_vm agents have identities; others return 404.
+  // Auth via the usual company-access gate (board / local_trusted / agent
+  // membership). In prod the daemon should pass its agent API key so only
+  // the agent itself — and the board — can fetch.
+  router.get("/companies/:companyId/agents/:id/identity", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    if (agent.companyId !== companyId) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    if (agent.adapterType !== "aliaskit_vm") {
+      res.status(404).json({
+        error:
+          "Identity is only available for aliaskit_vm agents. Container " +
+          "and other adapter types have no external identity.",
+      });
+      return;
+    }
+    const metadata = (agent.metadata as Record<string, unknown> | null) ?? {};
+    const zoot = (metadata.zootropolis as Record<string, unknown> | null) ?? {};
+    const identity = zoot.aliaskit;
+    if (!identity) {
+      res.status(404).json({
+        error:
+          "No identity provisioned for this agent. If the agent was " +
+          "hired before v1.2 it may need to be recreated, or set " +
+          "metadata.zootropolis.aliaskit manually.",
+      });
+      return;
+    }
+    res.json(identity);
+  });
+
   router.get("/agents/:id/skills", async (req, res) => {
     const id = req.params.id as string;
     const agent = await svc.getById(id);
@@ -1517,6 +1559,23 @@ export function agentRoutes(db: Db) {
       // Canonicalise: both fields carry the URL; the adapter reads runtimeEndpoint.
       requestedAdapterConfig.externalEndpoint = endpoint;
       requestedAdapterConfig.runtimeEndpoint = endpoint;
+
+      // Phase L (v1.2): mint a mock AliasKit identity now and stash it on
+      // the agent's metadata. External daemons fetch this via
+      // GET /api/companies/:id/agents/:id/identity — no filesystem writes.
+      const existingMeta = (createInput.metadata as Record<string, unknown> | null) ?? {};
+      const existingZ = (existingMeta.zootropolis as Record<string, unknown> | null) ?? {};
+      const existingAliaskit = existingZ.aliaskit;
+      if (!existingAliaskit) {
+        const identity = mockIdentityFor("pending"); // agentId is minted by svc.create; re-slug below
+        (createInput as { metadata?: Record<string, unknown> }).metadata = {
+          ...existingMeta,
+          zootropolis: {
+            ...existingZ,
+            aliaskit: identity,
+          },
+        };
+      }
     }
     const desiredSkillAssignment = await resolveDesiredSkillAssignment(
       companyId,
