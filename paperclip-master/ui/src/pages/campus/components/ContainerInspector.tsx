@@ -18,6 +18,7 @@ import { useContainerChildren } from "../hooks/useContainerChildren";
 import { useContainerIssues } from "../hooks/useContainerIssues";
 import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
 import { IssueQuickLook } from "./IssueQuickLook";
+import { AddToExistingButton } from "./AddToExistingDialog";
 import { palette } from "../palette";
 
 /**
@@ -598,11 +599,18 @@ function FooterActions({
           >
             Promote
           </div>
-          <WrapInButton
-            companyId={companyId}
-            self={self}
-            wrapInLayer={wrapInLayer}
-          />
+          <div className="flex flex-col gap-1.5">
+            <WrapInButton
+              companyId={companyId}
+              self={self}
+              wrapInLayer={wrapInLayer}
+            />
+            <AddToExistingButton
+              companyId={companyId}
+              self={self}
+              parentLayer={wrapInLayer}
+            />
+          </div>
         </div>
       )}
     </div>
