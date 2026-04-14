@@ -6,7 +6,6 @@ import {
   LoadingOverlay,
   NotFoundOverlay,
 } from "../components/SceneOverlays";
-import { StatusLight } from "../components/StatusLight";
 import {
   pickAnimalPaletteKey,
   useContainerChildren,
@@ -58,8 +57,7 @@ export function AgentView() {
           <NotFoundOverlay layer="agent" backHref={backHref} backLabel={backLabel} />
         ) : (
           <>
-            <Animal color={color} />
-            <StatusLight mode="idle" />
+            <Animal color={color} agentId={id} />
             <Text
               position={[0, -0.9, 1.2]}
               rotation={[-Math.PI / 6, 0, 0]}

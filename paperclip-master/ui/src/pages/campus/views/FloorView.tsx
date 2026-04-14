@@ -10,6 +10,7 @@ import {
   NotFoundOverlay,
 } from "../components/SceneOverlays";
 import { useContainerChildren } from "../hooks/useContainerChildren";
+import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
 import { palette } from "../palette";
 
 /** Lay out N rooms on a single-row grid centered on the slab. */
@@ -84,6 +85,7 @@ export function FloorView() {
     id ?? null,
   );
   const floorName = self?.name ?? id ?? "Floor";
+  const liveStatus = useContainerLiveStatus(companyId ?? "", id ?? null);
 
   const showNotFound = !loading && !!id && self === null;
   const backHref = parent
@@ -98,7 +100,7 @@ export function FloorView() {
         <ambientLight intensity={0.7} />
         <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
-        <ContainerView layer="floor" name={floorName}>
+        <ContainerView layer="floor" name={floorName} status={liveStatus}>
           {loading ? (
             <LoadingOverlay />
           ) : showNotFound ? (

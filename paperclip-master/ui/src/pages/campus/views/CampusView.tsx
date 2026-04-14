@@ -6,6 +6,7 @@ import type { Agent } from "@paperclipai/shared";
 import { ContainerView } from "../components/ContainerView";
 import { EmptyLayerOverlay, LoadingOverlay } from "../components/SceneOverlays";
 import { useContainerChildren } from "../hooks/useContainerChildren";
+import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
 import { palette } from "../palette";
 
 /** Lay out N buildings on a loose grid centered at the origin. */
@@ -82,6 +83,7 @@ export function CampusView() {
   const { companyId } = useParams<{ companyId: string }>();
   const { children, loading } = useContainerChildren(companyId ?? "", null);
   const campusName = companyId ?? "Zootropolis";
+  const liveStatus = useContainerLiveStatus(companyId ?? "", null);
 
   return (
     <div className="h-[calc(100vh-0px)] w-full">
@@ -90,7 +92,7 @@ export function CampusView() {
         <ambientLight intensity={0.7} />
         <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
-        <ContainerView layer="campus" name={campusName}>
+        <ContainerView layer="campus" name={campusName} status={liveStatus}>
           {loading ? (
             <LoadingOverlay />
           ) : children.length === 0 ? (

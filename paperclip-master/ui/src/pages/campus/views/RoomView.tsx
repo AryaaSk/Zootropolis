@@ -14,6 +14,7 @@ import {
   pickAnimalPaletteKey,
   useContainerChildren,
 } from "../hooks/useContainerChildren";
+import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
 import { palette } from "../palette";
 
 /** Lay out N animals in a single row across the room floor. */
@@ -51,7 +52,7 @@ function ClickableAnimal({
         onClick();
       }}
     >
-      <Animal color={color} />
+      <Animal color={color} agentId={agent.id} />
       <Text
         position={[0, -0.45, 1.2]}
         rotation={[-Math.PI / 6, 0, 0]}
@@ -78,6 +79,7 @@ export function RoomView() {
     id ?? null,
   );
   const roomName = self?.name ?? id ?? "Room";
+  const liveStatus = useContainerLiveStatus(companyId ?? "", id ?? null);
 
   const showNotFound = !loading && !!id && self === null;
   const backHref = parent
@@ -92,7 +94,7 @@ export function RoomView() {
         <ambientLight intensity={0.7} />
         <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
-        <ContainerView layer="room" name={roomName}>
+        <ContainerView layer="room" name={roomName} status={liveStatus}>
           {loading ? (
             <LoadingOverlay />
           ) : showNotFound ? (

@@ -10,6 +10,7 @@ import {
   NotFoundOverlay,
 } from "../components/SceneOverlays";
 import { useContainerChildren } from "../hooks/useContainerChildren";
+import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
 import { palette } from "../palette";
 
 function FloorSlabPlaceholder({
@@ -65,6 +66,7 @@ export function BuildingView() {
   const { companyId, id } = useParams<{ companyId: string; id: string }>();
   const { self, children, loading } = useContainerChildren(companyId ?? "", id ?? null);
   const buildingName = self?.name ?? id ?? "Building";
+  const liveStatus = useContainerLiveStatus(companyId ?? "", id ?? null);
 
   const showNotFound = !loading && !!id && self === null;
 
@@ -75,7 +77,7 @@ export function BuildingView() {
         <ambientLight intensity={0.7} />
         <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
-        <ContainerView layer="building" name={buildingName}>
+        <ContainerView layer="building" name={buildingName} status={liveStatus}>
           {loading ? (
             <LoadingOverlay />
           ) : showNotFound ? (
