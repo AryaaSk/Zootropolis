@@ -1,8 +1,9 @@
 import { useMemo, useRef } from "react";
-import { Edges, Instance, Instances } from "@react-three/drei";
+import { Edges } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import type { Group } from "three";
 import { palette } from "../palette";
+import { LamppostModel, TreeModel } from "./models/NatureModels";
 
 /**
  * G2 — Procedural low-poly decorations sprinkled across the campus shells.
@@ -102,6 +103,10 @@ function TreeCluster({ placements }: { placements: Placement[] }) {
 
   if (placements.length === 0) return null;
 
+  // K4: swap the procedural trunk + canopy spheres for a GLB tree.
+  // Alternate pine / oak by index so clusters read as mixed forest. The
+  // sway animation stays on the outer group wrapper — it rotates the
+  // GLB as a whole, so no animation code changes with the geometry swap.
   return (
     <group>
       {placements.map((p, i) => (
@@ -114,28 +119,7 @@ function TreeCluster({ placements }: { placements: Placement[] }) {
           rotation={[0, p.rotationY, 0]}
           scale={p.scale}
         >
-          {/* Trunk */}
-          <mesh position={[0, 0.5, 0]}>
-            <cylinderGeometry args={[0.08, 0.1, 1.0, 6]} />
-            <meshLambertMaterial color={palette.clay} />
-            <Edges color={palette.ink} threshold={15} />
-          </mesh>
-          {/* Canopy: 3 overlapping spheres in two greens. */}
-          <mesh position={[0, 1.35, 0]}>
-            <sphereGeometry args={[0.55, 10, 8]} />
-            <meshLambertMaterial color={palette.grassDark} />
-            <Edges color={palette.ink} threshold={25} />
-          </mesh>
-          <mesh position={[0.28, 1.55, 0.12]}>
-            <sphereGeometry args={[0.38, 10, 8]} />
-            <meshLambertMaterial color={palette.grassLight} />
-            <Edges color={palette.ink} threshold={25} />
-          </mesh>
-          <mesh position={[-0.22, 1.5, -0.14]}>
-            <sphereGeometry args={[0.34, 10, 8]} />
-            <meshLambertMaterial color={palette.grassLight} />
-            <Edges color={palette.ink} threshold={25} />
-          </mesh>
+          <TreeModel variant={i % 2 === 0 ? "pine" : "oak"} />
         </group>
       ))}
     </group>
@@ -156,35 +140,30 @@ function LamppostCluster({
   height?: number;
 }) {
   if (placements.length === 0) return null;
-  const postH = height;
+  // K4: GLB lamppost per placement via <Clone>. We still scatter + size
+  // the placements the same way as before, so existing seeds don't move
+  // lampposts around the campus. An emissive cream bulb sits on top of
+  // the GLB post so bloom still picks up a glow (Kenney's lamppost model
+  // doesn't ship with an emissive material of its own).
   return (
     <group>
-      {/* Poles — instanced cylinders. */}
-      <Instances limit={Math.max(placements.length, 1)} range={placements.length}>
-        <cylinderGeometry args={[0.04, 0.05, postH, 6]} />
-        <meshLambertMaterial color={palette.ink} />
-        {placements.map((p, i) => (
-          <Instance
-            key={`pole-${i}`}
-            position={[p.position[0], p.position[1] + postH / 2, p.position[2]]}
-            scale={[p.scale, 1, p.scale]}
-          />
-        ))}
-      </Instances>
-      {/* Bulbs — emissive cream. Kept as plain meshes (small N) so bloom
-          picks them up via the standard material emissive channel. */}
       {placements.map((p, i) => (
-        <mesh
-          key={`bulb-${i}`}
-          position={[p.position[0], p.position[1] + postH + 0.1, p.position[2]]}
+        <group
+          key={i}
+          position={p.position}
+          rotation={[0, p.rotationY, 0]}
+          scale={p.scale}
         >
-          <sphereGeometry args={[0.13, 10, 8]} />
-          <meshStandardMaterial
-            color={palette.cream}
-            emissive={palette.cream}
-            emissiveIntensity={1.6}
-          />
-        </mesh>
+          <LamppostModel height={height} />
+          <mesh position={[0, height + 0.1, 0]}>
+            <sphereGeometry args={[0.13, 10, 8]} />
+            <meshStandardMaterial
+              color={palette.cream}
+              emissive={palette.cream}
+              emissiveIntensity={1.6}
+            />
+          </mesh>
+        </group>
       ))}
     </group>
   );

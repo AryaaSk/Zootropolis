@@ -97,6 +97,10 @@ function BuildingScene({
       <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
       <ContainerView layer="building" name={buildingName} status={liveStatus}>
+        {/* K3: GLB building body. ContainerView's BuildingShell now only
+            draws the ground pad + label + glow halo; the visible tower
+            is this GLB. Floor slabs still stack inside/around it. */}
+        {id && <BuildingModel agentId={id} />}
         {loading ? (
           <LoadingOverlay />
         ) : showNotFound ? (
