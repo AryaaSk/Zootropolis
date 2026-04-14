@@ -1,6 +1,11 @@
 // Townscaper-inspired palette for Zootropolis.
 // Named colors only — never hardcode hex literals in components.
 // Warm off-whites, muted terracottas, dusty blues, one saturated accent.
+//
+// AO deferred — emissives + edges already give us most of the visual lift
+// (see CampusPostFx + drei <Edges /> on every container shell). If we
+// revisit, N8AO from @react-three/postprocessing is already available and
+// three-mesh-bvh is in node_modules for accelerated raycasting.
 
 export const palette = {
   // Sky / background
