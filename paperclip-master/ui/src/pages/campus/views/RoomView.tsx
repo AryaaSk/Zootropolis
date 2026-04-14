@@ -10,6 +10,7 @@ import { CampusOverlay } from "../components/CampusOverlay";
 import { CampusPostFx } from "../components/CampusPostFx";
 import { ContainerInspector } from "../components/ContainerInspector";
 import { ContainerView } from "../components/ContainerView";
+import { RoomInterior } from "../components/models/RoomInterior";
 import {
   EmptyLayerOverlay,
   LoadingOverlay,
@@ -122,6 +123,7 @@ function RoomScene({
       <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
       <ContainerView layer="room" name={roomName} status={liveStatus}>
+        <RoomInterior childCount={children.length} roomId={id ?? "unknown"} />
         {loading ? (
           <LoadingOverlay />
         ) : showNotFound ? (

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
+import { OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
 import { Vector3 } from "three";
 import { BuildingWindows } from "../components/BuildingWindows";
+import { BuildingModel } from "../components/models/BuildingModel";
 import { CampusDecorations } from "../components/CampusDecorations";
 import { CampusEnvironment } from "../components/CampusEnvironment";
 import { CampusOverlay } from "../components/CampusOverlay";
@@ -74,18 +75,10 @@ function BuildingPlaceholder({
         onClick();
       }}
     >
-      {/* Body */}
-      <mesh position={[0, 1.6, 0]}>
-        <boxGeometry args={[3, 3.2, 3]} />
-        <meshLambertMaterial color={palette.bone} />
-        <Edges color={palette.ink} threshold={15} />
-      </mesh>
-      {/* Roof */}
-      <mesh position={[0, 3.35, 0]}>
-        <boxGeometry args={[3.3, 0.3, 3.3]} />
-        <meshLambertMaterial color={palette.clay} />
-        <Edges color={palette.ink} threshold={15} />
-      </mesh>
+      {/* K3: GLB-backed body (replaces procedural box+roof). Variant is
+          hashed from agent id so each building has a stable silhouette.
+          Falls back to the pre-K3 procedural shell on Suspense or lq=1. */}
+      <BuildingModel agentId={agent.id} />
       {/* Emissive window grid on the +z front face. Bloom (via CampusPostFx)
           turns these into a soft glow when the building has running work. */}
       <BuildingWindows

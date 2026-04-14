@@ -106,5 +106,33 @@ All 17 v1.1 phases shipped on `work/zootropolis-v1` (commits `19b44d2..d0a2fd6`)
   instanced, deterministic positions, no GLB assets.
 - `?lq=1` URL toggle skips postprocess for weak GPUs.
 
+## v1.2 — in progress on this branch
+
+**Bottom-up-only hire flow (Phase I)**
+- "+ Hire an agent" button lives ONLY at campus root. All per-layer hires
+  removed. Structure is built by wrapping (existing Wrap-in) OR by joining
+  existing structure (new "+ Add to existing <parent-layer>" action).
+- Leaf hires require an explicit `ws://...` runtime endpoint at hire time —
+  server rejects aliaskit_vm creates without one (400). Port broker no
+  longer auto-spawns in-process daemons; the operator owns daemon lifecycle.
+- Scenario supported: new floor joins an EXISTING building (not a new one)
+  via "+ Add to existing building" after wrapping.
+
+**Soft-fail reachability (Phase J)**
+- `GET /api/companies/:id/agents/:id/runtime-probe` — server opens a WS to
+  the agent's endpoint, does the hello/ready handshake with 2s timeout.
+- `useAgentReachability` hook polls every 10s per on-screen leaf.
+- Unreachable leaves: red StatusLight + exclamation sphere, body tinted grey,
+  AgentView banner with "Retry probe". Rest of the campus keeps working.
+
+**Real low-poly GLB models (Phase K, in flight)**
+- CC0 assets from Quaternius + Kenney, vendored at
+  `ui/public/assets/zootropolis/` (24 files, 497KB total).
+- Role-mapped animals (fox/cat/owl/bear/rabbit/wolf/dog/sheep).
+- Hashed building variants (small-house/office/shop/tower/cottage).
+- GLB trees, bushes, rocks, lampposts.
+- Desks/chairs/monitors/lamps as room interior.
+- Procedural fallback preserved — `?lq=1` skips all GLBs.
+
 Each of these graduates by swapping one piece — the architecture is
 already shaped so they're additive, not rewrites.

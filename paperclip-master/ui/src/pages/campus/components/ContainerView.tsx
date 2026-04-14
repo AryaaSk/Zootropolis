@@ -153,7 +153,11 @@ function FloorShell({ name, active }: { name: string; active: boolean }) {
   );
 }
 
-// Building shell: a tall thin block placeholder. B3 stacks floors inside/around it.
+// Building shell: K3 — ground pad + label + glow halo only. The
+// translucent tower box was replaced by a GLB building body rendered by
+// BuildingView as a child of ContainerView (so the campus reads as a
+// real building rather than a transparent cube). The halo still breathes
+// around the rough tower volume when descendants are running.
 function BuildingShell({ name, active }: { name: string; active: boolean }) {
   return (
     <group>
@@ -161,12 +165,6 @@ function BuildingShell({ name, active }: { name: string; active: boolean }) {
       <mesh position={[0, -0.7, 0]}>
         <boxGeometry args={[10, 0.2, 10]} />
         <meshLambertMaterial color={palette.ground} />
-        <Edges color={palette.ink} threshold={15} />
-      </mesh>
-      {/* Tower shell (semi-transparent so stacked floors read through) */}
-      <mesh position={[0, 3, 0]}>
-        <boxGeometry args={[5, 7, 5]} />
-        <wallStuccoMaterial color={new Color(palette.bone)} uOpacity={0.35} transparent />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
       <Text

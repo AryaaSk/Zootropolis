@@ -4,6 +4,7 @@ import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
 import { Vector3 } from "three";
+import { BuildingModel } from "../components/models/BuildingModel";
 import { CampusDecorations } from "../components/CampusDecorations";
 import { CampusEnvironment } from "../components/CampusEnvironment";
 import { CampusOverlay } from "../components/CampusOverlay";

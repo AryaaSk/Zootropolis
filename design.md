@@ -371,9 +371,22 @@ What gets us from "gray boxes" to "Townscaper vibe" cheaply:
 
 Libraries in: `@react-three/drei`, `@react-three/postprocessing`, `three-mesh-bvh`, `maath`.
 
-Libraries out: anything that ships GLBs, any city-generator with its own scene model, CSG.
+Libraries out: any city-generator with its own scene model, CSG.
 
-Guardrail: **no building should use more than 3 mesh types** (body + roof + window grid). If you're modeling a facade, stop.
+Guardrail: **no building should use more than 3 mesh types** in the procedural path (body + roof + window grid). If you're modeling a facade from primitives, stop.
+
+### 8d-revised. GLB models (v1.2)
+
+v1 shipped with a hard "no GLBs, no textures, no asset pipeline" rule. v1.2 relaxes it under strict conditions:
+
+- **CC0 1.0 Public Domain only.** No CC-BY, no MIT-with-attribution, no proprietary. Paperclip itself is MIT; bundled assets cannot add restrictions downstream.
+- **Vendored, not fetched at runtime.** Assets live at `ui/public/assets/zootropolis/` and ship with the fork. No CDN dependency, no network request at page load.
+- **Budget ≤2MB total.** Current v1.2 inventory is 24 files totalling 497KB. Each file ≤80KB.
+- **Lazy-loaded via drei `useGLTF` + Suspense.** Never blocks initial render. Instance via `<Clone>` for N-of-a-kind.
+- **Procedural fallback path retained.** Every GLB consumer (`AnimalModel`, `BuildingModel`, `NatureModels`, `RoomInterior`) falls back to the pre-v1.2 procedural geometry when (a) `useLowQualityMode()` returns true (`?lq=1` URL param) or (b) Suspense is still loading.
+- **Attribution in `ui/public/assets/zootropolis/LICENSES.md`.** Per-file source URL + license note, even though CC0 doesn't strictly require it.
+
+Current sources: Quaternius (animals, buildings) and Kenney.nl (city, nature, furniture kits), both CC0.
 
 ### 8e. Navigation UX
 
@@ -393,7 +406,7 @@ Both are pure 2D overlays on top of the R3F canvas. ~100 lines of HTML. Ship alo
 - No user-draggable spatial layout (positions are derived from the tree).
 - No dashboard view — the campus IS the dashboard.
 - No long-lived Claude subprocess inside the daemon (per-wake spawn is fine for v1).
-- No GLB assets, no textures.
+- ~~No GLB assets, no textures.~~ **Relaxed in v1.2 under the CC0-only/vendored/≤2MB rules in §8d-revised above.**
 
 Each is a v2 candidate. None blocks the architecture.
 
