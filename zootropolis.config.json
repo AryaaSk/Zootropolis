@@ -1,0 +1,17 @@
+{
+  "$schema": "./scripts/zootropolis-config.schema.json",
+
+  "delegation": {
+    "strict": true
+  },
+
+  "runtime": {
+    "mode": "mixed",
+    "portRange": { "start": 7100, "end": 7999 },
+    "agentsRoot": "~/zootropolis/agents"
+  },
+
+  "aliaskit": {
+    "useReal": false
+  }
+}

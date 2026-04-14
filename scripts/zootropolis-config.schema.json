@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zootropolis.dev/zootropolis.config.schema.json",
+  "title": "Zootropolis runtime configuration",
+  "description": "Read by scripts/dev.sh at server boot and exposed to Paperclip as environment variables. Each field maps to one ZOOTROPOLIS_* env var; env vars already set in the shell win over the file, so you can still override per-run.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "delegation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strict": {
+          "type": "boolean",
+          "description": "Enforce strict parent↔child issue assignment and per-agent issue visibility. Maps to ZOOTROPOLIS_DELEGATION_STRICT."
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["mixed", "external_only"],
+          "description": "'mixed' (default): aliaskit_vm leaves may use either an external daemon endpoint or a dev-spawned local daemon. 'external_only': reject aliaskit_vm hires without adapterConfig.externalEndpoint. Maps to ZOOTROPOLIS_RUNTIME_MODE."
+        },
+        "portRange": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "end"],
+          "properties": {
+            "start": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+            "end":   { "type": "integer", "minimum": 1024, "maximum": 65535 }
+          },
+          "description": "TCP range the port broker picks from for in-process dev daemons. Maps to ZOOTROPOLIS_PORT_RANGE_{START,END}."
+        },
+        "agentsRoot": {
+          "type": "string",
+          "description": "Directory where per-agent folders live (`.claude/`, `workspace/`, `memory.md`, `identity.json`, …). Tilde is expanded. Maps to ZOOTROPOLIS_AGENTS_ROOT."
+        }
+      }
+    },
+    "aliaskit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "useReal": {
+          "type": "boolean",
+          "description": "Wire the real AliasKit API for identity provisioning. Default false = mock identities in identity.json. Maps to ZOOTROPOLIS_USE_REAL_ALIASKIT."
+        }
+      }
+    }
+  }
+}

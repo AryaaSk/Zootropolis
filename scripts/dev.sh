@@ -8,10 +8,16 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PAPERCLIP_HOME="${REPO_ROOT}/.paperclip"
-# Zootropolis: strict parent↔child issue delegation + agent visibility scoping.
-# See design.md §3 + §4. Set to false (or unset) to fall back to vanilla
-# Paperclip semantics.
-export ZOOTROPOLIS_DELEGATION_STRICT=true
+
+# Load zootropolis.config.json → ZOOTROPOLIS_* env vars. Existing shell env
+# wins over the file, so `FOO=bar ./scripts/dev.sh` and one-off overrides
+# still work. Schema at scripts/zootropolis-config.schema.json.
+if [ -f "${REPO_ROOT}/zootropolis.config.json" ]; then
+  CONFIG_EXPORTS="$(node "${REPO_ROOT}/scripts/zootropolis-env.mjs")"
+  if [ -n "${CONFIG_EXPORTS}" ]; then
+    eval "${CONFIG_EXPORTS}"
+  fi
+fi
 
 cd "${REPO_ROOT}/paperclip-master"
 
