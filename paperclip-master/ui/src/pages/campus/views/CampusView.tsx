@@ -4,6 +4,9 @@ import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
 import { Vector3 } from "three";
+import { BuildingWindows } from "../components/BuildingWindows";
+import { CampusOverlay } from "../components/CampusOverlay";
+import { CampusPostFx } from "../components/CampusPostFx";
 import { ContainerView } from "../components/ContainerView";
 import { EmptyLayerOverlay, LoadingOverlay } from "../components/SceneOverlays";
 import { useContainerChildren } from "../hooks/useContainerChildren";
@@ -34,16 +37,21 @@ function buildingPosition(index: number, total: number): [number, number, number
 function BuildingPlaceholder({
   agent,
   position,
+  companyId,
   onClick,
 }: {
   agent: Agent;
   position: [number, number, number];
+  companyId: string | undefined;
   onClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
   const [x, y, z] = position;
   const lift = hovered ? 0.2 : 0;
+  // B5 live status for this building — drives emissive window glow.
+  const buildingStatus = useContainerLiveStatus(companyId ?? "", agent.id);
+  const windowsActive = buildingStatus === "running";
 
   return (
     <group
@@ -70,6 +78,9 @@ function BuildingPlaceholder({
         <meshLambertMaterial color={palette.clay} />
         <Edges color={palette.ink} threshold={15} />
       </mesh>
+      {/* Emissive window grid on the +z front face. Bloom (via CampusPostFx)
+          turns these into a soft glow when the building has running work. */}
+      <BuildingWindows width={3} height={3.2} y={1.6} z={1.5} active={windowsActive} />
       <Text
         position={[0, 0.05, 1.8]}
         rotation={[-Math.PI / 2, 0, 0]}
@@ -112,6 +123,7 @@ function CampusScene({ companyId }: { companyId: string | undefined }) {
                 key={agent.id}
                 agent={agent}
                 position={pos}
+                companyId={companyId}
                 onClick={() =>
                   transitionTo(
                     // Aim at building-body centroid, not the ground pad.
@@ -134,6 +146,8 @@ function CampusScene({ companyId }: { companyId: string | undefined }) {
         maxPolarAngle={Math.PI / 2.2}
         target={[0, 0, 0]}
       />
+
+      <CampusPostFx />
     </>
   );
 }
@@ -146,12 +160,13 @@ export function CampusView() {
   const { companyId } = useParams<{ companyId: string }>();
 
   return (
-    <div className="h-[calc(100vh-0px)] w-full">
+    <div className="relative h-[calc(100vh-0px)] w-full">
       <Canvas camera={{ position: CAMPUS_CAMERA, fov: 45 }} shadows={false} dpr={[1, 2]}>
         <ZoomTransitionProvider>
           <CampusScene companyId={companyId} />
         </ZoomTransitionProvider>
       </Canvas>
+      <CampusOverlay />
     </div>
   );
 }

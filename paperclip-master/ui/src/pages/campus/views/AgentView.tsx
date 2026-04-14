@@ -3,6 +3,8 @@ import { OrbitControls, Text, Html } from "@react-three/drei";
 import { readZootropolisLayer, type ZootropolisAgentMetadata } from "@paperclipai/shared";
 import { useParams } from "@/lib/router";
 import { Animal } from "../components/Animal";
+import { CampusOverlay } from "../components/CampusOverlay";
+import { CampusPostFx } from "../components/CampusPostFx";
 import {
   LoadingOverlay,
   NotFoundOverlay,
@@ -12,18 +14,28 @@ import {
   useContainerChildren,
 } from "../hooks/useContainerChildren";
 import { palette } from "../palette";
+import {
+  ZoomTransitionProvider,
+  useIsTransitioning,
+  useZoomInEntrance,
+} from "../lib/zoom-transition";
 
-/**
- * AgentView — single-leaf-agent R3F scene.
- * Pulls the agent's display name (and color) from Paperclip's agents list so
- * the label reflects the real name rather than the URL :id.
- */
-export function AgentView() {
-  const { companyId, id } = useParams<{ companyId: string; id: string }>();
+const AGENT_CAMERA: [number, number, number] = [4, 3.5, 5];
+const AGENT_LOOKAT: [number, number, number] = [0, 0.8, 0];
+
+function AgentScene({
+  companyId,
+  id,
+}: {
+  companyId: string | undefined;
+  id: string | undefined;
+}) {
   const { self, parent, loading } = useContainerChildren(
     companyId ?? "",
     id ?? null,
   );
+  const isTransitioning = useIsTransitioning();
+  useZoomInEntrance(AGENT_CAMERA, AGENT_LOOKAT);
 
   const showNotFound = !loading && !!id && self === null;
   const label = self?.name ?? id ?? "agent";
@@ -35,87 +47,109 @@ export function AgentView() {
   const backLabel = parent ? "room" : "campus";
 
   return (
-    <div className="h-[calc(100vh-0px)] w-full">
+    <>
+      <color attach="background" args={[palette.sky]} />
+
+      <ambientLight intensity={0.7} />
+      <directionalLight position={[5, 8, 3]} intensity={0.6} />
+
+      {/* Ground */}
+      <mesh position={[0, -0.45, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[30, 30]} />
+        <meshLambertMaterial color={palette.ground} />
+      </mesh>
+
+      {loading ? (
+        <LoadingOverlay />
+      ) : showNotFound ? (
+        <NotFoundOverlay layer="agent" backHref={backHref} backLabel={backLabel} />
+      ) : (
+        <>
+          <Animal color={color} agentId={id} />
+          <Text
+            position={[0, -0.9, 1.2]}
+            rotation={[-Math.PI / 6, 0, 0]}
+            fontSize={0.24}
+            color={palette.ink}
+            anchorX="center"
+            anchorY="middle"
+          >
+            {label}
+          </Text>
+          {/* VM-stream surface — Phase B7. Renders an HTML overlay framed
+              inside the scene as the agent's "screen". For v1 we show a
+              placeholder until Cua/Coasty wires real VNC; once
+              metadata.zootropolis.runtime exposes a vncUrl, this <Html>
+              will host the noVNC iframe. */}
+          <group position={[0, 1.6, -1.2]}>
+            <mesh>
+              <planeGeometry args={[3.4, 1.9]} />
+              <meshLambertMaterial color={palette.bone} />
+            </mesh>
+            <mesh position={[0, 0, 0.001]}>
+              <planeGeometry args={[3.2, 1.7]} />
+              <meshLambertMaterial color={palette.ink} />
+            </mesh>
+            <Html
+              position={[0, 0, 0.01]}
+              transform
+              distanceFactor={2}
+              occlude={false}
+              style={{
+                width: 280,
+                height: 150,
+                background: palette.ink,
+                color: palette.cream,
+                padding: 8,
+                fontFamily: "ui-monospace, monospace",
+                fontSize: 10,
+                overflow: "hidden",
+                border: `1px solid ${palette.dustBlue}`,
+                borderRadius: 2,
+              }}
+            >
+              <VmStreamPlaceholder agentId={id ?? ""} metadata={self?.metadata as ZootropolisAgentMetadata | null | undefined} />
+            </Html>
+          </group>
+        </>
+      )}
+
+      <OrbitControls
+        enabled={!isTransitioning}
+        enablePan={false}
+        minDistance={4}
+        maxDistance={12}
+        minPolarAngle={Math.PI / 6}
+        maxPolarAngle={Math.PI / 2.2}
+        target={AGENT_LOOKAT}
+      />
+
+      <CampusPostFx />
+    </>
+  );
+}
+
+/**
+ * AgentView — single-leaf-agent R3F scene.
+ * Pulls the agent's display name (and color) from Paperclip's agents list so
+ * the label reflects the real name rather than the URL :id. Leaf layer: no
+ * children to zoom into, so only the entrance animation runs on mount.
+ */
+export function AgentView() {
+  const { companyId, id } = useParams<{ companyId: string; id: string }>();
+
+  return (
+    <div className="relative h-[calc(100vh-0px)] w-full">
       <Canvas
-        camera={{ position: [4, 3.5, 5], fov: 45 }}
+        camera={{ position: AGENT_CAMERA, fov: 45 }}
         shadows={false}
         dpr={[1, 2]}
       >
-        <color attach="background" args={[palette.sky]} />
-
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[5, 8, 3]} intensity={0.6} />
-
-        {/* Ground */}
-        <mesh position={[0, -0.45, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[30, 30]} />
-          <meshLambertMaterial color={palette.ground} />
-        </mesh>
-
-        {loading ? (
-          <LoadingOverlay />
-        ) : showNotFound ? (
-          <NotFoundOverlay layer="agent" backHref={backHref} backLabel={backLabel} />
-        ) : (
-          <>
-            <Animal color={color} agentId={id} />
-            <Text
-              position={[0, -0.9, 1.2]}
-              rotation={[-Math.PI / 6, 0, 0]}
-              fontSize={0.24}
-              color={palette.ink}
-              anchorX="center"
-              anchorY="middle"
-            >
-              {label}
-            </Text>
-            {/* VM-stream surface — Phase B7. Renders an HTML overlay framed
-                inside the scene as the agent's "screen". For v1 we show a
-                placeholder until Cua/Coasty wires real VNC; once
-                metadata.zootropolis.runtime exposes a vncUrl, this <Html>
-                will host the noVNC iframe. */}
-            <group position={[0, 1.6, -1.2]}>
-              <mesh>
-                <planeGeometry args={[3.4, 1.9]} />
-                <meshLambertMaterial color={palette.bone} />
-              </mesh>
-              <mesh position={[0, 0, 0.001]}>
-                <planeGeometry args={[3.2, 1.7]} />
-                <meshLambertMaterial color={palette.ink} />
-              </mesh>
-              <Html
-                position={[0, 0, 0.01]}
-                transform
-                distanceFactor={2}
-                occlude={false}
-                style={{
-                  width: 280,
-                  height: 150,
-                  background: palette.ink,
-                  color: palette.cream,
-                  padding: 8,
-                  fontFamily: "ui-monospace, monospace",
-                  fontSize: 10,
-                  overflow: "hidden",
-                  border: `1px solid ${palette.dustBlue}`,
-                  borderRadius: 2,
-                }}
-              >
-                <VmStreamPlaceholder agentId={id ?? ""} metadata={self?.metadata as ZootropolisAgentMetadata | null | undefined} />
-              </Html>
-            </group>
-          </>
-        )}
-
-        <OrbitControls
-          enablePan={false}
-          minDistance={4}
-          maxDistance={12}
-          minPolarAngle={Math.PI / 6}
-          maxPolarAngle={Math.PI / 2.2}
-          target={[0, 0.8, 0]}
-        />
+        <ZoomTransitionProvider>
+          <AgentScene companyId={companyId} id={id} />
+        </ZoomTransitionProvider>
       </Canvas>
+      <CampusOverlay />
     </div>
   );
 }

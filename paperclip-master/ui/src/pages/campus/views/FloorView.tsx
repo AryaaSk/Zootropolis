@@ -4,6 +4,8 @@ import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
 import { Vector3 } from "three";
+import { CampusOverlay } from "../components/CampusOverlay";
+import { CampusPostFx } from "../components/CampusPostFx";
 import { ContainerView } from "../components/ContainerView";
 import {
   EmptyLayerOverlay,
@@ -150,6 +152,8 @@ function FloorScene({
         maxPolarAngle={Math.PI / 2.2}
         target={FLOOR_LOOKAT}
       />
+
+      <CampusPostFx />
     </>
   );
 }
@@ -162,12 +166,13 @@ export function FloorView() {
   const { companyId, id } = useParams<{ companyId: string; id: string }>();
 
   return (
-    <div className="h-[calc(100vh-0px)] w-full">
+    <div className="relative h-[calc(100vh-0px)] w-full">
       <Canvas camera={{ position: FLOOR_CAMERA, fov: 45 }} shadows={false} dpr={[1, 2]}>
         <ZoomTransitionProvider>
           <FloorScene companyId={companyId} id={id} />
         </ZoomTransitionProvider>
       </Canvas>
+      <CampusOverlay />
     </div>
   );
 }
