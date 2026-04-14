@@ -591,6 +591,9 @@ export function issueRoutes(
         req.query.includeRoutineExecutions === "true" || req.query.includeRoutineExecutions === "1",
       q: req.query.q as string | undefined,
       limit,
+      // Zootropolis: when caller is an agent, scope visibility to issues
+      // they're a party to. Boards / humans keep full visibility.
+      requesterAgentId: req.actor.type === "agent" ? req.actor.agentId : undefined,
     });
     res.json(result);
   });
@@ -651,7 +654,11 @@ export function issueRoutes(
 
   router.get("/issues/:id", async (req, res) => {
     const id = req.params.id as string;
-    const issue = await svc.getById(id);
+    // Zootropolis: scope visibility for agents — return 404 if the requester
+    // is an agent who is neither creator nor assignee. Boards/humans see all.
+    const issue = await svc.getById(id, {
+      requesterAgentId: req.actor.type === "agent" ? req.actor.agentId : undefined,
+    });
     if (!issue) {
       res.status(404).json({ error: "Issue not found" });
       return;

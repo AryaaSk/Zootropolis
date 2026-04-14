@@ -81,6 +81,12 @@ export interface IssueFilters {
   includeRoutineExecutions?: boolean;
   q?: string;
   limit?: number;
+  /**
+   * Zootropolis: when set, scope results to issues where this agent is creator
+   * or assignee. Routes set this to req.actor.agentId when the requester is an
+   * agent, leaving humans (board) with full visibility.
+   */
+  requesterAgentId?: string;
 }
 
 type IssueRow = typeof issues.$inferSelect;
@@ -134,6 +140,38 @@ const TERMINAL_HEARTBEAT_RUN_STATUSES = new Set(["succeeded", "failed", "cancell
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
+}
+
+/**
+ * Zootropolis delegation rule: an issue may only exist between an agent and
+ * its direct parent or child in the reports-to tree. Strictly parent↔child;
+ * no skip-layer, no peer messaging, no cross-subtree shortcuts.
+ *
+ * Pure check used by the create path. Returns { allowed: true } or
+ * { allowed: false, reason } so callers can format errors how they like.
+ */
+export function checkDirectReportDelegation(input: {
+  creatorAgentId: string;
+  assigneeAgent: { id: string; reportsTo: string | null };
+}): { allowed: true } | { allowed: false; reason: string } {
+  const { creatorAgentId, assigneeAgent } = input;
+  if (assigneeAgent.id === creatorAgentId) {
+    return { allowed: false, reason: "Cannot assign an issue to yourself" };
+  }
+  if (assigneeAgent.reportsTo !== creatorAgentId) {
+    return {
+      allowed: false,
+      reason:
+        "Zootropolis delegation rule: issues may only be assigned to a direct report. " +
+        "Escalate up to your manager or delegate to one of your own reports.",
+    };
+  }
+  return { allowed: true };
+}
+
+export function isZootropolisDelegationStrict(): boolean {
+  const flag = (process.env.ZOOTROPOLIS_DELEGATION_STRICT ?? "").toLowerCase();
+  return flag === "true" || flag === "1" || flag === "yes";
 }
 
 async function getProjectDefaultGoalId(
@@ -591,6 +629,37 @@ export function issueService(db: Db) {
     }
   }
 
+  // Zootropolis: enforce strict parent↔child delegation when both creator and
+  // assignee are agents. Behind ZOOTROPOLIS_DELEGATION_STRICT so we can flip
+  // it off during debugging without redeploying.
+  async function assertZootropolisDelegation(
+    companyId: string,
+    creatorAgentId: string,
+    assigneeAgentId: string,
+  ) {
+    if (!isZootropolisDelegationStrict()) return;
+    const assignee = await db
+      .select({
+        id: agents.id,
+        companyId: agents.companyId,
+        reportsTo: agents.reportsTo,
+      })
+      .from(agents)
+      .where(eq(agents.id, assigneeAgentId))
+      .then((rows) => rows[0] ?? null);
+    if (!assignee) throw notFound("Assignee agent not found");
+    if (assignee.companyId !== companyId) {
+      throw unprocessable("Assignee must belong to same company");
+    }
+    const result = checkDirectReportDelegation({
+      creatorAgentId,
+      assigneeAgent: { id: assignee.id, reportsTo: assignee.reportsTo ?? null },
+    });
+    if (!result.allowed) {
+      throw conflict(result.reason);
+    }
+  }
+
   async function assertAssignableUser(companyId: string, userId: string) {
     const membership = await db
       .select({ id: companyMemberships.id })
@@ -960,6 +1029,14 @@ export function issueService(db: Db) {
       if (unreadForUserId) {
         conditions.push(unreadForUserCondition(companyId, unreadForUserId));
       }
+      if (filters?.requesterAgentId && isZootropolisDelegationStrict()) {
+        conditions.push(
+          or(
+            eq(issues.createdByAgentId, filters.requesterAgentId),
+            eq(issues.assigneeAgentId, filters.requesterAgentId),
+          )!,
+        );
+      }
       if (filters?.projectId) conditions.push(eq(issues.projectId, filters.projectId));
       if (filters?.executionWorkspaceId) {
         conditions.push(eq(issues.executionWorkspaceId, filters.executionWorkspaceId));
@@ -1251,15 +1328,29 @@ export function issueService(db: Db) {
       return row ?? null;
     },
 
-    getById: async (raw: string) => {
+    getById: async (raw: string, opts?: { requesterAgentId?: string }) => {
       const id = raw.trim();
+      let issue: Awaited<ReturnType<typeof getIssueByUuid>> = null;
       if (/^[A-Z]+-\d+$/i.test(id)) {
-        return getIssueByIdentifier(id);
+        issue = await getIssueByIdentifier(id);
+      } else if (!isUuidLike(id)) {
+        return null;
+      } else {
+        issue = await getIssueByUuid(id);
       }
-      if (!isUuidLike(id)) {
+      // Zootropolis: agent visibility scoping. Hide the issue from any agent
+      // that isn't a party to it (return null = 404, not 403, so the agent
+      // can't even probe for existence).
+      if (
+        issue &&
+        opts?.requesterAgentId &&
+        isZootropolisDelegationStrict() &&
+        issue.createdByAgentId !== opts.requesterAgentId &&
+        issue.assigneeAgentId !== opts.requesterAgentId
+      ) {
         return null;
       }
-      return getIssueByUuid(id);
+      return issue;
     },
 
     getByIdentifier: async (identifier: string) => {
@@ -1399,6 +1490,13 @@ export function issueService(db: Db) {
       }
       if (data.assigneeUserId) {
         await assertAssignableUser(companyId, data.assigneeUserId);
+      }
+      if (data.createdByAgentId && data.assigneeAgentId) {
+        await assertZootropolisDelegation(
+          companyId,
+          data.createdByAgentId,
+          data.assigneeAgentId,
+        );
       }
       if (data.status === "in_progress" && !data.assigneeAgentId && !data.assigneeUserId) {
         throw unprocessable("in_progress issues require an assignee");
