@@ -12,7 +12,18 @@ import { ensureFolderBootstrapped } from "./folder-bootstrap.js";
 import { invokeClaude } from "./claude-invoker.js";
 
 export interface DaemonOptions {
-  agentId: string;
+  /**
+   * Configured agent id.
+   *
+   * - Set → the daemon expects every incoming `hello` to carry a matching
+   *   agentId. Mismatches close the socket with `agent_id_mismatch`,
+   *   surfacing the problem to the operator at second-1 instead of
+   *   silently continuing with stale context.
+   * - Unset (undefined/null/"") → auto-adopt the first non-probe hello's
+   *   agentId. Convenient for ad-hoc / dev daemons where the UUID is
+   *   minted by Paperclip AFTER the daemon starts.
+   */
+  agentId?: string | null;
   port: number;
   folder: string;
   /** Override the agent CLI binary; default is "claude". */
@@ -37,7 +48,20 @@ export interface RunningDaemon {
  * Wire protocol: see packages/adapters/aliaskit-vm/src/shared/protocol.ts
  */
 export function startDaemon(opts: DaemonOptions): RunningDaemon {
-  const log = opts.log ?? ((msg: string) => process.stderr.write(`[agent-runtime ${opts.agentId}] ${msg}\n`));
+  // State shared across connections: the resolved agent identity. Starts
+  // as opts.agentId (or null for auto-adopt mode) and latches on first
+  // non-probe hello. Once latched, further hellos MUST match.
+  const state: { resolvedAgentId: string | null } = {
+    resolvedAgentId:
+      typeof opts.agentId === "string" && opts.agentId.length > 0
+        ? opts.agentId
+        : null,
+  };
+  const log = opts.log
+    ?? ((msg: string) =>
+      process.stderr.write(
+        `[agent-runtime ${state.resolvedAgentId ?? "?"}] ${msg}\n`,
+      ));
 
   const wss = new WebSocketServer({ port: opts.port });
   let ready!: () => void;
@@ -48,7 +72,11 @@ export function startDaemon(opts: DaemonOptions): RunningDaemon {
   });
 
   wss.on("listening", () => {
-    log(`listening on ws://0.0.0.0:${opts.port}/`);
+    log(
+      state.resolvedAgentId
+        ? `listening on ws://0.0.0.0:${opts.port}/ (agentId=${state.resolvedAgentId})`
+        : `listening on ws://0.0.0.0:${opts.port}/ (agentId=unset — will auto-adopt from first hello)`,
+    );
     ready();
   });
   wss.on("error", (err) => {
@@ -57,7 +85,7 @@ export function startDaemon(opts: DaemonOptions): RunningDaemon {
   });
 
   wss.on("connection", (socket) => {
-    handleConnection(socket, opts, log).catch((err) => {
+    handleConnection(socket, opts, state, log).catch((err) => {
       log(`connection handler crashed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
       try {
         socket.close();
@@ -69,13 +97,22 @@ export function startDaemon(opts: DaemonOptions): RunningDaemon {
 
   return {
     port: opts.port,
-    agentId: opts.agentId,
+    agentId: opts.agentId ?? "",
     ready: readyPromise,
     close: () => new Promise<void>((res) => wss.close(() => res())),
   };
 }
 
-async function handleConnection(socket: WebSocket, opts: DaemonOptions, log: (msg: string) => void) {
+interface DaemonState {
+  resolvedAgentId: string | null;
+}
+
+async function handleConnection(
+  socket: WebSocket,
+  opts: DaemonOptions,
+  state: DaemonState,
+  log: (msg: string) => void,
+) {
   let helloed = false;
 
   socket.on("message", (raw) => {
@@ -89,10 +126,11 @@ async function handleConnection(socket: WebSocket, opts: DaemonOptions, log: (ms
     if (!frame || typeof frame !== "object" || Array.isArray(frame)) return;
 
     if (frame.type === "hello") {
-      handleHello(socket, frame, opts).catch((err) => {
+      handleHello(socket, frame, state, log).then((accepted) => {
+        helloed = accepted;
+      }).catch((err) => {
         log(`hello handler error: ${err instanceof Error ? err.message : String(err)}`);
       });
-      helloed = true;
       return;
     }
     if (!helloed) {
@@ -102,7 +140,7 @@ async function handleConnection(socket: WebSocket, opts: DaemonOptions, log: (ms
     if (frame.type === "req") {
       const req = frame as ExecuteRequestFrame | ShutdownRequestFrame;
       if (req.method === "execute") {
-        void handleExecute(socket, req as ExecuteRequestFrame, opts, log);
+        void handleExecute(socket, req as ExecuteRequestFrame, opts, state, log);
       } else if (req.method === "shutdown") {
         void handleShutdown(socket, req as ShutdownRequestFrame, log);
       } else {
@@ -116,29 +154,91 @@ async function handleConnection(socket: WebSocket, opts: DaemonOptions, log: (ms
   });
 }
 
-async function handleHello(socket: WebSocket, frame: HelloFrame, opts: DaemonOptions) {
-  // We do not enforce token auth in dev; in prod the daemon would validate
-  // frame.token against a per-VM secret.
-  if (frame.agentId !== opts.agentId && frame.agentId !== "probe") {
-    // Accept anyway but log; the daemon is single-tenant by design.
-    process.stderr.write(`[agent-runtime ${opts.agentId}] hello with mismatched agentId=${frame.agentId}\n`);
+/**
+ * Returns true if the hello was accepted (subsequent frames allowed).
+ * Returns false if we refused (socket is being closed).
+ */
+async function handleHello(
+  socket: WebSocket,
+  frame: HelloFrame,
+  state: DaemonState,
+  log: (msg: string) => void,
+): Promise<boolean> {
+  // Probe frames don't count as adoption — test-environment traffic
+  // shouldn't latch the daemon's identity to the literal string "probe".
+  if (frame.agentId === "probe") {
+    const ready: ReadyFrame = {
+      type: "ready",
+      agentId: state.resolvedAgentId ?? "probe",
+      caps: { sessionResume: true, screenshots: false },
+    };
+    socket.send(JSON.stringify(ready));
+    return true;
   }
+
+  if (state.resolvedAgentId === null) {
+    // Auto-adopt mode: latch on the first real hello.
+    state.resolvedAgentId = frame.agentId;
+    log(`adopted agentId from first hello: ${frame.agentId}`);
+  } else if (state.resolvedAgentId !== frame.agentId) {
+    // Configured-but-mismatching: fatal. Close the socket with a clear
+    // reason so the operator's Paperclip logs / adapter test panel
+    // surface the mismatch at second 1 rather than silently drifting
+    // into an identity-404 an execute later.
+    const msg =
+      `agent_id_mismatch: daemon is configured for ${state.resolvedAgentId} ` +
+      `but hello carried ${frame.agentId}. Restart daemon with the ` +
+      `Paperclip-minted agentId (or leave it unset for auto-adopt).`;
+    log(`refusing hello: ${msg}`);
+    try {
+      // Send a res-shaped error frame so clients that log final results
+      // get a breadcrumb, even though there's no outstanding req yet.
+      socket.send(
+        JSON.stringify({
+          type: "res",
+          id: "hello-refused",
+          ok: false,
+          error: { code: "agent_id_mismatch", message: msg },
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+    try {
+      socket.close(1008, "agent_id_mismatch");
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+
   const ready: ReadyFrame = {
     type: "ready",
-    agentId: opts.agentId,
+    agentId: state.resolvedAgentId,
     caps: { sessionResume: true, screenshots: false },
   };
   socket.send(JSON.stringify(ready));
+  return true;
 }
 
 async function handleExecute(
   socket: WebSocket,
   req: ExecuteRequestFrame,
   opts: DaemonOptions,
+  state: DaemonState,
   log: (msg: string) => void,
 ) {
-  await ensureFolderBootstrapped(opts.folder, opts.agentId);
-  log(`execute id=${req.id} runId=${req.params.runId} resume=${req.params.resumeSessionId ?? "(fresh)"}`);
+  // Bootstrap with the resolved agentId (opts.agentId may be unset under
+  // auto-adopt mode; state.resolvedAgentId is guaranteed set by the time
+  // any non-probe hello has latched).
+  const bootstrapId = state.resolvedAgentId ?? opts.agentId ?? "unknown";
+  await ensureFolderBootstrapped(opts.folder, bootstrapId);
+  const binary = opts.binary ?? "claude";
+  log(
+    `execute id=${req.id} runId=${req.params.runId} ` +
+    `resume=${req.params.resumeSessionId ?? "(fresh)"} binary=${binary}`,
+  );
+  const startedAt = Date.now();
 
   const onChunk = (stream: "stdout" | "stderr", chunk: string) => {
     const frame: StreamFrame = { type: "stream", reqId: req.id, stream, chunk };
@@ -159,6 +259,11 @@ async function handleExecute(
     binary: opts.binary,
     onChunk,
   });
+  log(
+    `execute id=${req.id} done exitCode=${result.exitCode} ` +
+    `signal=${result.signal} durationMs=${Date.now() - startedAt} ` +
+    `sessionId=${result.sessionId ?? "(none)"}`,
+  );
 
   const res: ResponseFrame = {
     type: "res",

@@ -38,11 +38,32 @@ export function invokeClaude(opts: InvokeOptions): Promise<InvokeRunReturn> {
     // claude takes the prompt on stdin when invoked with no positional arg.
 
     const binary = opts.binary ?? "claude";
-    const child = spawn(binary, args, {
-      cwd: opts.folder,
-      env: { ...process.env, ...(opts.env ?? {}) },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    let child;
+    try {
+      child = spawn(binary, args, {
+        cwd: opts.folder,
+        env: { ...process.env, ...(opts.env ?? {}) },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (err) {
+      // spawn can throw synchronously when the binary path is invalid
+      // (e.g., ENOENT for "claude" not on PATH). Return a clean error
+      // result instead of crashing the daemon.
+      resolve({
+        exitCode: null,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        usage: undefined,
+        resultJson: {
+          error: err instanceof Error ? err.message : String(err),
+          hint:
+            `Daemon could not spawn "${binary}". Check it's on PATH in ` +
+            `the shell that started the daemon: \`which ${binary}\`.`,
+        },
+      });
+      return;
+    }
 
     let stdoutBuf = "";
     let stderrBuf = "";
@@ -79,13 +100,25 @@ export function invokeClaude(opts: InvokeOptions): Promise<InvokeRunReturn> {
 
     child.on("error", (err) => {
       if (deadline) clearTimeout(deadline);
+      // ENOENT surfaces here when the binary isn't on PATH. Give the
+      // caller a clear hint rather than an opaque "error" string so
+      // runtime.log is self-explanatory.
+      const code = (err as NodeJS.ErrnoException).code;
+      const hint =
+        code === "ENOENT"
+          ? `Binary "${binary}" not found on PATH of the shell that started the daemon.`
+          : undefined;
       resolve({
         exitCode: null,
         signal: null,
         timedOut,
         sessionId: null,
         usage: undefined,
-        resultJson: { error: err.message, stderr: stderrBuf },
+        resultJson: {
+          error: err.message,
+          ...(hint ? { hint } : {}),
+          stderr: stderrBuf,
+        },
       });
     });
 
