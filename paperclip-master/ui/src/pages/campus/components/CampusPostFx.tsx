@@ -1,5 +1,6 @@
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import type { ReactNode } from "react";
+import { useLowQualityMode } from "../lib/quality-mode";
 
 /**
  * CampusPostFx — wraps scene contents in an EffectComposer with soft Bloom
@@ -20,6 +21,13 @@ import type { ReactNode } from "react";
  * the Townscaper look depends on, so we leave it off.
  */
 export function CampusPostFx({ children }: { children?: ReactNode }) {
+  // Phase G6: ?lq=1 in the URL skips the postprocess pass entirely. The
+  // EffectComposer + Bloom is the single most expensive frame contributor
+  // on weak GPUs, so it's the first thing to drop.
+  const lowQuality = useLowQualityMode();
+  if (lowQuality) {
+    return <>{children}</>;
+  }
   return (
     <EffectComposer multisampling={0} enableNormalPass={false}>
       <Bloom
