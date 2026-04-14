@@ -5,7 +5,9 @@ import { damp } from "maath/easing";
 import type { Group } from "three";
 import { palette } from "../palette";
 import { useAgentLiveStatus } from "../hooks/useAgentLiveStatus";
+import { useLowQualityMode } from "../lib/quality-mode";
 import { StatusLight } from "./StatusLight";
+import { AnimalModel } from "./models/AnimalModel";
 
 interface AnimalProps {
   color?: string;
@@ -18,6 +20,12 @@ interface AnimalProps {
    * (used by pre-B5 views that don't yet carry an agent id).
    */
   agentId?: string;
+  /**
+   * Zootropolis v1.2 K2 — agent role ("engineer" / "researcher" / …). Passed
+   * through to AnimalModel to pick the matching low-poly GLB (fox, owl, …).
+   * Missing / unknown roles fall back to a deterministic hash on agentId.
+   */
+  role?: string;
   /** When true, renders a StatusLight above the animal. Defaults to true when agentId is provided. */
   showStatusLight?: boolean;
   /**
@@ -52,11 +60,6 @@ function hashPhase(id: string | undefined): number {
   return ((h >>> 0) / 0xffffffff) * Math.PI * 2;
 }
 
-/**
- * Cube-animal primitive.
- * Simple body cube + small head cube + 2 eye dots. Flat Lambert + outlines.
- * With an agentId, pulses on heartbeat.run.started and status-lights the run.
- */
 // Mix a palette colour toward neutral grey — used when an agent is unreachable
 // so the whole body reads as muted/offline. Kept tiny + allocation-free per
 // render; the mix ratio is fixed (50%) to match the red bulb's clear "off"
@@ -74,10 +77,76 @@ function desaturate(hex: string): string {
     .padStart(2, "0")}${mix(b).toString(16).padStart(2, "0")}`;
 }
 
+/**
+ * Pre-K2 procedural cube body. Kept inline so `?lq=1` — and the GLB
+ * Suspense fallback indirectly — still have a working animal even when
+ * the model pipeline is disabled. The transform wrapper (idle bob +
+ * heartbeat pulse) lives in the parent Animal component; this is just
+ * the static geometry.
+ */
+function ProceduralAnimal({ bodyColor }: { bodyColor: string }) {
+  return (
+    <>
+      {/* Body */}
+      <mesh position={[0, 0.6, 0]}>
+        <boxGeometry args={[1.2, 1.2, 1.6]} />
+        <meshLambertMaterial color={bodyColor} />
+        <Edges color={palette.ink} threshold={15} />
+      </mesh>
+
+      {/* Head */}
+      <mesh position={[0, 1.55, 0.7]}>
+        <boxGeometry args={[0.8, 0.8, 0.8]} />
+        <meshLambertMaterial color={bodyColor} />
+        <Edges color={palette.ink} threshold={15} />
+      </mesh>
+
+      {/* Eyes */}
+      <mesh position={[-0.22, 1.65, 1.11]}>
+        <boxGeometry args={[0.12, 0.12, 0.04]} />
+        <meshLambertMaterial color={palette.ink} />
+      </mesh>
+      <mesh position={[0.22, 1.65, 1.11]}>
+        <boxGeometry args={[0.12, 0.12, 0.04]} />
+        <meshLambertMaterial color={palette.ink} />
+      </mesh>
+
+      {/* Legs */}
+      <mesh position={[-0.4, -0.1, -0.5]}>
+        <boxGeometry args={[0.3, 0.6, 0.3]} />
+        <meshLambertMaterial color={bodyColor} />
+        <Edges color={palette.ink} threshold={15} />
+      </mesh>
+      <mesh position={[0.4, -0.1, -0.5]}>
+        <boxGeometry args={[0.3, 0.6, 0.3]} />
+        <meshLambertMaterial color={bodyColor} />
+        <Edges color={palette.ink} threshold={15} />
+      </mesh>
+      <mesh position={[-0.4, -0.1, 0.5]}>
+        <boxGeometry args={[0.3, 0.6, 0.3]} />
+        <meshLambertMaterial color={bodyColor} />
+        <Edges color={palette.ink} threshold={15} />
+      </mesh>
+      <mesh position={[0.4, -0.1, 0.5]}>
+        <boxGeometry args={[0.3, 0.6, 0.3]} />
+        <meshLambertMaterial color={bodyColor} />
+        <Edges color={palette.ink} threshold={15} />
+      </mesh>
+    </>
+  );
+}
+
+/**
+ * Animal — group wrapper around either a role-mapped GLB (default) or
+ * the procedural cube primitive (`?lq=1`). The wrapper owns the idle
+ * bob + heartbeat pulse transforms so both paths animate identically.
+ * With an agentId, pulses on heartbeat.run.started and status-lights the run.
+ */
 export function Animal({
   color = palette.terracotta,
   position = [0, 0, 0],
   agentId,
+  role,
   showStatusLight,
   unreachable = false,
 }: AnimalProps) {
@@ -86,6 +155,7 @@ export function Animal({
   const bobPhaseRef = useRef(hashPhase(agentId));
   const baseYRef = useRef(position[1]);
   baseYRef.current = position[1];
+  const lowQuality = useLowQualityMode();
 
   // Pulse state is intentionally kept out of React: bump a ref on pulseKey
   // change, then interpolate inside useFrame. Avoids per-frame re-renders
@@ -139,51 +209,11 @@ export function Animal({
 
   return (
     <group ref={groupRef} position={position}>
-      {/* Body */}
-      <mesh position={[0, 0.6, 0]}>
-        <boxGeometry args={[1.2, 1.2, 1.6]} />
-        <meshLambertMaterial color={bodyColor} />
-        <Edges color={palette.ink} threshold={15} />
-      </mesh>
-
-      {/* Head */}
-      <mesh position={[0, 1.55, 0.7]}>
-        <boxGeometry args={[0.8, 0.8, 0.8]} />
-        <meshLambertMaterial color={bodyColor} />
-        <Edges color={palette.ink} threshold={15} />
-      </mesh>
-
-      {/* Eyes */}
-      <mesh position={[-0.22, 1.65, 1.11]}>
-        <boxGeometry args={[0.12, 0.12, 0.04]} />
-        <meshLambertMaterial color={palette.ink} />
-      </mesh>
-      <mesh position={[0.22, 1.65, 1.11]}>
-        <boxGeometry args={[0.12, 0.12, 0.04]} />
-        <meshLambertMaterial color={palette.ink} />
-      </mesh>
-
-      {/* Legs */}
-      <mesh position={[-0.4, -0.1, -0.5]}>
-        <boxGeometry args={[0.3, 0.6, 0.3]} />
-        <meshLambertMaterial color={bodyColor} />
-        <Edges color={palette.ink} threshold={15} />
-      </mesh>
-      <mesh position={[0.4, -0.1, -0.5]}>
-        <boxGeometry args={[0.3, 0.6, 0.3]} />
-        <meshLambertMaterial color={bodyColor} />
-        <Edges color={palette.ink} threshold={15} />
-      </mesh>
-      <mesh position={[-0.4, -0.1, 0.5]}>
-        <boxGeometry args={[0.3, 0.6, 0.3]} />
-        <meshLambertMaterial color={bodyColor} />
-        <Edges color={palette.ink} threshold={15} />
-      </mesh>
-      <mesh position={[0.4, -0.1, 0.5]}>
-        <boxGeometry args={[0.3, 0.6, 0.3]} />
-        <meshLambertMaterial color={bodyColor} />
-        <Edges color={palette.ink} threshold={15} />
-      </mesh>
+      {lowQuality ? (
+        <ProceduralAnimal bodyColor={bodyColor} />
+      ) : (
+        <AnimalModel role={role} agentId={agentId} color={bodyColor} />
+      )}
 
       {renderStatusLight && <StatusLight status={status} unreachable={unreachable} />}
     </group>
