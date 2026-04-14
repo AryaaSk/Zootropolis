@@ -3,11 +3,21 @@ import { Canvas } from "@react-three/fiber";
 import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
+import { Vector3 } from "three";
 import { ContainerView } from "../components/ContainerView";
 import { EmptyLayerOverlay, LoadingOverlay } from "../components/SceneOverlays";
 import { useContainerChildren } from "../hooks/useContainerChildren";
 import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
 import { palette } from "../palette";
+import {
+  ZoomTransitionProvider,
+  useIsTransitioning,
+  useZoomInEntrance,
+  useZoomInTransition,
+} from "../lib/zoom-transition";
+
+const CAMPUS_CAMERA: [number, number, number] = [14, 12, 18];
+const CAMPUS_LOOKAT: [number, number, number] = [0, 0, 0];
 
 /** Lay out N buildings on a loose grid centered at the origin. */
 function buildingPosition(index: number, total: number): [number, number, number] {
@@ -74,49 +84,73 @@ function BuildingPlaceholder({
   );
 }
 
-/**
- * CampusView — a ground plane with one building per campus-layer root agent.
- * Click → BuildingView for that agent's id.
- */
-export function CampusView() {
+function CampusScene({ companyId }: { companyId: string | undefined }) {
   const navigate = useNavigate();
-  const { companyId } = useParams<{ companyId: string }>();
   const { children, loading } = useContainerChildren(companyId ?? "", null);
   const campusName = companyId ?? "Zootropolis";
   const liveStatus = useContainerLiveStatus(companyId ?? "", null);
+  const transitionTo = useZoomInTransition();
+  const isTransitioning = useIsTransitioning();
+  useZoomInEntrance(CAMPUS_CAMERA, CAMPUS_LOOKAT);
 
   return (
-    <div className="h-[calc(100vh-0px)] w-full">
-      <Canvas camera={{ position: [14, 12, 18], fov: 45 }} shadows={false} dpr={[1, 2]}>
-        <color attach="background" args={[palette.sky]} />
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[5, 8, 3]} intensity={0.6} />
+    <>
+      <color attach="background" args={[palette.sky]} />
+      <ambientLight intensity={0.7} />
+      <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
-        <ContainerView layer="campus" name={campusName} status={liveStatus}>
-          {loading ? (
-            <LoadingOverlay />
-          ) : children.length === 0 ? (
-            <EmptyLayerOverlay layer="campus" />
-          ) : (
-            children.map((agent, i) => (
+      <ContainerView layer="campus" name={campusName} status={liveStatus}>
+        {loading ? (
+          <LoadingOverlay />
+        ) : children.length === 0 ? (
+          <EmptyLayerOverlay layer="campus" />
+        ) : (
+          children.map((agent, i) => {
+            const pos = buildingPosition(i, children.length);
+            return (
               <BuildingPlaceholder
                 key={agent.id}
                 agent={agent}
-                position={buildingPosition(i, children.length)}
-                onClick={() => navigate(`/campus/${companyId}/building/${agent.id}`)}
+                position={pos}
+                onClick={() =>
+                  transitionTo(
+                    // Aim at building-body centroid, not the ground pad.
+                    new Vector3(pos[0], pos[1] + 1.6, pos[2]),
+                    () => navigate(`/campus/${companyId}/building/${agent.id}`),
+                  )
+                }
               />
-            ))
-          )}
-        </ContainerView>
+            );
+          })
+        )}
+      </ContainerView>
 
-        <OrbitControls
-          enablePan={false}
-          minDistance={10}
-          maxDistance={40}
-          minPolarAngle={Math.PI / 6}
-          maxPolarAngle={Math.PI / 2.2}
-          target={[0, 0, 0]}
-        />
+      <OrbitControls
+        enabled={!isTransitioning}
+        enablePan={false}
+        minDistance={10}
+        maxDistance={40}
+        minPolarAngle={Math.PI / 6}
+        maxPolarAngle={Math.PI / 2.2}
+        target={[0, 0, 0]}
+      />
+    </>
+  );
+}
+
+/**
+ * CampusView — a ground plane with one building per campus-layer root agent.
+ * Click → dolly the camera toward the building, then route into BuildingView.
+ */
+export function CampusView() {
+  const { companyId } = useParams<{ companyId: string }>();
+
+  return (
+    <div className="h-[calc(100vh-0px)] w-full">
+      <Canvas camera={{ position: CAMPUS_CAMERA, fov: 45 }} shadows={false} dpr={[1, 2]}>
+        <ZoomTransitionProvider>
+          <CampusScene companyId={companyId} />
+        </ZoomTransitionProvider>
       </Canvas>
     </div>
   );

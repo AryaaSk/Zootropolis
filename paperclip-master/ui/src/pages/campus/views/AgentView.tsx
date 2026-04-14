@@ -1,5 +1,6 @@
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Text } from "@react-three/drei";
+import { OrbitControls, Text, Html } from "@react-three/drei";
+import { readZootropolisLayer, type ZootropolisAgentMetadata } from "@paperclipai/shared";
 import { useParams } from "@/lib/router";
 import { Animal } from "../components/Animal";
 import {
@@ -68,6 +69,41 @@ export function AgentView() {
             >
               {label}
             </Text>
+            {/* VM-stream surface — Phase B7. Renders an HTML overlay framed
+                inside the scene as the agent's "screen". For v1 we show a
+                placeholder until Cua/Coasty wires real VNC; once
+                metadata.zootropolis.runtime exposes a vncUrl, this <Html>
+                will host the noVNC iframe. */}
+            <group position={[0, 1.6, -1.2]}>
+              <mesh>
+                <planeGeometry args={[3.4, 1.9]} />
+                <meshLambertMaterial color={palette.bone} />
+              </mesh>
+              <mesh position={[0, 0, 0.001]}>
+                <planeGeometry args={[3.2, 1.7]} />
+                <meshLambertMaterial color={palette.ink} />
+              </mesh>
+              <Html
+                position={[0, 0, 0.01]}
+                transform
+                distanceFactor={2}
+                occlude={false}
+                style={{
+                  width: 280,
+                  height: 150,
+                  background: palette.ink,
+                  color: palette.cream,
+                  padding: 8,
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: 10,
+                  overflow: "hidden",
+                  border: `1px solid ${palette.dustBlue}`,
+                  borderRadius: 2,
+                }}
+              >
+                <VmStreamPlaceholder agentId={id ?? ""} metadata={self?.metadata as ZootropolisAgentMetadata | null | undefined} />
+              </Html>
+            </group>
           </>
         )}
 
@@ -80,6 +116,43 @@ export function AgentView() {
           target={[0, 0.8, 0]}
         />
       </Canvas>
+    </div>
+  );
+}
+
+/**
+ * Placeholder content for the leaf agent's "screen" inside the room. v1
+ * shows the agent's runtime endpoint (so you can confirm the daemon is
+ * configured) and a "Live VNC stream coming when Cua/Coasty wires in"
+ * note. When metadata.zootropolis.runtime.vncUrl exists, a noVNC iframe
+ * will go here instead.
+ */
+function VmStreamPlaceholder(props: {
+  agentId: string;
+  metadata?: ZootropolisAgentMetadata | null;
+}) {
+  const layer = readZootropolisLayer(props.metadata as Record<string, unknown> | null | undefined);
+  const runtime = props.metadata?.runtime;
+  const aliaskit = props.metadata?.aliaskit;
+  return (
+    <div>
+      <div style={{ opacity: 0.7, marginBottom: 4 }}>
+        agent {props.agentId.slice(0, 8)} • {layer ?? "untagged"}
+      </div>
+      {runtime ? (
+        <div style={{ opacity: 0.9 }}>
+          <div>endpoint: {runtime.endpoint}</div>
+          <div>port: {runtime.port}</div>
+          {aliaskit?.email && <div>identity: {aliaskit.email}</div>}
+        </div>
+      ) : (
+        <div style={{ opacity: 0.6 }}>
+          (no runtime; this agent isn't a Zootropolis leaf)
+        </div>
+      )}
+      <div style={{ marginTop: 8, opacity: 0.5 }}>
+        live VNC stream lands when Cua/Coasty integration ships
+      </div>
     </div>
   );
 }

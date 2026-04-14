@@ -3,6 +3,7 @@ import { Canvas } from "@react-three/fiber";
 import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
+import { Vector3 } from "three";
 import { ContainerView } from "../components/ContainerView";
 import {
   EmptyLayerOverlay,
@@ -12,6 +13,15 @@ import {
 import { useContainerChildren } from "../hooks/useContainerChildren";
 import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
 import { palette } from "../palette";
+import {
+  ZoomTransitionProvider,
+  useIsTransitioning,
+  useZoomInEntrance,
+  useZoomInTransition,
+} from "../lib/zoom-transition";
+
+const FLOOR_CAMERA: [number, number, number] = [9, 8, 11];
+const FLOOR_LOOKAT: [number, number, number] = [0, 0, 0];
 
 /** Lay out N rooms on a single-row grid centered on the slab. */
 function roomPosition(index: number, total: number): [number, number, number] {
@@ -73,19 +83,23 @@ function RoomPlaceholder({
   );
 }
 
-/**
- * FloorView — a floor slab with one room per child agent.
- * Click → RoomView for that agent's id.
- */
-export function FloorView() {
+function FloorScene({
+  companyId,
+  id,
+}: {
+  companyId: string | undefined;
+  id: string | undefined;
+}) {
   const navigate = useNavigate();
-  const { companyId, id } = useParams<{ companyId: string; id: string }>();
   const { self, parent, children, loading } = useContainerChildren(
     companyId ?? "",
     id ?? null,
   );
   const floorName = self?.name ?? id ?? "Floor";
   const liveStatus = useContainerLiveStatus(companyId ?? "", id ?? null);
+  const transitionTo = useZoomInTransition();
+  const isTransitioning = useIsTransitioning();
+  useZoomInEntrance(FLOOR_CAMERA, FLOOR_LOOKAT);
 
   const showNotFound = !loading && !!id && self === null;
   const backHref = parent
@@ -94,39 +108,65 @@ export function FloorView() {
   const backLabel = parent ? "building" : "campus";
 
   return (
-    <div className="h-[calc(100vh-0px)] w-full">
-      <Canvas camera={{ position: [9, 8, 11], fov: 45 }} shadows={false} dpr={[1, 2]}>
-        <color attach="background" args={[palette.sky]} />
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[5, 8, 3]} intensity={0.6} />
+    <>
+      <color attach="background" args={[palette.sky]} />
+      <ambientLight intensity={0.7} />
+      <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
-        <ContainerView layer="floor" name={floorName} status={liveStatus}>
-          {loading ? (
-            <LoadingOverlay />
-          ) : showNotFound ? (
-            <NotFoundOverlay layer="floor" backHref={backHref} backLabel={backLabel} />
-          ) : children.length === 0 ? (
-            <EmptyLayerOverlay layer="floor" />
-          ) : (
-            children.map((agent, i) => (
+      <ContainerView layer="floor" name={floorName} status={liveStatus}>
+        {loading ? (
+          <LoadingOverlay />
+        ) : showNotFound ? (
+          <NotFoundOverlay layer="floor" backHref={backHref} backLabel={backLabel} />
+        ) : children.length === 0 ? (
+          <EmptyLayerOverlay layer="floor" />
+        ) : (
+          children.map((agent, i) => {
+            const pos = roomPosition(i, children.length);
+            return (
               <RoomPlaceholder
                 key={agent.id}
                 agent={agent}
-                position={roomPosition(i, children.length)}
-                onClick={() => navigate(`/campus/${companyId}/room/${agent.id}`)}
+                position={pos}
+                onClick={() =>
+                  transitionTo(
+                    // Aim at the roof-line so the handoff frames the room shell.
+                    new Vector3(pos[0], pos[1] + 0.5, pos[2]),
+                    () => navigate(`/campus/${companyId}/room/${agent.id}`),
+                  )
+                }
               />
-            ))
-          )}
-        </ContainerView>
+            );
+          })
+        )}
+      </ContainerView>
 
-        <OrbitControls
-          enablePan={false}
-          minDistance={6}
-          maxDistance={24}
-          minPolarAngle={Math.PI / 6}
-          maxPolarAngle={Math.PI / 2.2}
-          target={[0, 0, 0]}
-        />
+      <OrbitControls
+        enabled={!isTransitioning}
+        enablePan={false}
+        minDistance={6}
+        maxDistance={24}
+        minPolarAngle={Math.PI / 6}
+        maxPolarAngle={Math.PI / 2.2}
+        target={FLOOR_LOOKAT}
+      />
+    </>
+  );
+}
+
+/**
+ * FloorView — a floor slab with one room per child agent.
+ * Click → dolly the camera toward the room, then route into RoomView.
+ */
+export function FloorView() {
+  const { companyId, id } = useParams<{ companyId: string; id: string }>();
+
+  return (
+    <div className="h-[calc(100vh-0px)] w-full">
+      <Canvas camera={{ position: FLOOR_CAMERA, fov: 45 }} shadows={false} dpr={[1, 2]}>
+        <ZoomTransitionProvider>
+          <FloorScene companyId={companyId} id={id} />
+        </ZoomTransitionProvider>
       </Canvas>
     </div>
   );

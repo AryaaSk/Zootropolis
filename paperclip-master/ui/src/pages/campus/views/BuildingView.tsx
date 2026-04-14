@@ -3,6 +3,7 @@ import { Canvas } from "@react-three/fiber";
 import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
+import { Vector3 } from "three";
 import { ContainerView } from "../components/ContainerView";
 import {
   EmptyLayerOverlay,
@@ -12,6 +13,15 @@ import {
 import { useContainerChildren } from "../hooks/useContainerChildren";
 import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
 import { palette } from "../palette";
+import {
+  ZoomTransitionProvider,
+  useIsTransitioning,
+  useZoomInEntrance,
+  useZoomInTransition,
+} from "../lib/zoom-transition";
+
+const BUILDING_CAMERA: [number, number, number] = [10, 6, 12];
+const BUILDING_LOOKAT: [number, number, number] = [0, 2.5, 0];
 
 function FloorSlabPlaceholder({
   agent,
@@ -57,57 +67,85 @@ function FloorSlabPlaceholder({
   );
 }
 
-/**
- * BuildingView — a building shell with one slab per child floor agent.
- * Click → FloorView for that agent's id.
- */
-export function BuildingView() {
+function BuildingScene({
+  companyId,
+  id,
+}: {
+  companyId: string | undefined;
+  id: string | undefined;
+}) {
   const navigate = useNavigate();
-  const { companyId, id } = useParams<{ companyId: string; id: string }>();
   const { self, children, loading } = useContainerChildren(companyId ?? "", id ?? null);
   const buildingName = self?.name ?? id ?? "Building";
   const liveStatus = useContainerLiveStatus(companyId ?? "", id ?? null);
+  const transitionTo = useZoomInTransition();
+  const isTransitioning = useIsTransitioning();
+  useZoomInEntrance(BUILDING_CAMERA, BUILDING_LOOKAT);
 
   const showNotFound = !loading && !!id && self === null;
 
   return (
-    <div className="h-[calc(100vh-0px)] w-full">
-      <Canvas camera={{ position: [10, 6, 12], fov: 45 }} shadows={false} dpr={[1, 2]}>
-        <color attach="background" args={[palette.sky]} />
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[5, 8, 3]} intensity={0.6} />
+    <>
+      <color attach="background" args={[palette.sky]} />
+      <ambientLight intensity={0.7} />
+      <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
-        <ContainerView layer="building" name={buildingName} status={liveStatus}>
-          {loading ? (
-            <LoadingOverlay />
-          ) : showNotFound ? (
-            <NotFoundOverlay
-              layer="building"
-              backHref={`/campus/${companyId}`}
-              backLabel="campus"
-            />
-          ) : children.length === 0 ? (
-            <EmptyLayerOverlay layer="building" />
-          ) : (
-            children.map((agent, i) => (
+      <ContainerView layer="building" name={buildingName} status={liveStatus}>
+        {loading ? (
+          <LoadingOverlay />
+        ) : showNotFound ? (
+          <NotFoundOverlay
+            layer="building"
+            backHref={`/campus/${companyId}`}
+            backLabel="campus"
+          />
+        ) : children.length === 0 ? (
+          <EmptyLayerOverlay layer="building" />
+        ) : (
+          children.map((agent, i) => {
+            const y = 0.5 + i * 2;
+            return (
               <FloorSlabPlaceholder
                 key={agent.id}
                 agent={agent}
-                y={0.5 + i * 2}
-                onClick={() => navigate(`/campus/${companyId}/floor/${agent.id}`)}
+                y={y}
+                onClick={() =>
+                  transitionTo(new Vector3(0, y, 0), () =>
+                    navigate(`/campus/${companyId}/floor/${agent.id}`),
+                  )
+                }
               />
-            ))
-          )}
-        </ContainerView>
+            );
+          })
+        )}
+      </ContainerView>
 
-        <OrbitControls
-          enablePan={false}
-          minDistance={6}
-          maxDistance={22}
-          minPolarAngle={Math.PI / 8}
-          maxPolarAngle={Math.PI / 2.2}
-          target={[0, 2.5, 0]}
-        />
+      <OrbitControls
+        enabled={!isTransitioning}
+        enablePan={false}
+        minDistance={6}
+        maxDistance={22}
+        minPolarAngle={Math.PI / 8}
+        maxPolarAngle={Math.PI / 2.2}
+        target={BUILDING_LOOKAT}
+      />
+    </>
+  );
+}
+
+/**
+ * BuildingView — a building shell with one slab per child floor agent.
+ * Click → dolly the camera toward the floor, then route into FloorView.
+ */
+export function BuildingView() {
+  const { companyId, id } = useParams<{ companyId: string; id: string }>();
+
+  return (
+    <div className="h-[calc(100vh-0px)] w-full">
+      <Canvas camera={{ position: BUILDING_CAMERA, fov: 45 }} shadows={false} dpr={[1, 2]}>
+        <ZoomTransitionProvider>
+          <BuildingScene companyId={companyId} id={id} />
+        </ZoomTransitionProvider>
       </Canvas>
     </div>
   );

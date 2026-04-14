@@ -3,6 +3,7 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
+import { Vector3 } from "three";
 import { Animal } from "../components/Animal";
 import { ContainerView } from "../components/ContainerView";
 import {
@@ -16,6 +17,15 @@ import {
 } from "../hooks/useContainerChildren";
 import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
 import { palette } from "../palette";
+import {
+  ZoomTransitionProvider,
+  useIsTransitioning,
+  useZoomInEntrance,
+  useZoomInTransition,
+} from "../lib/zoom-transition";
+
+const ROOM_CAMERA: [number, number, number] = [6, 5, 7];
+const ROOM_LOOKAT: [number, number, number] = [0, 0.4, 0];
 
 /** Lay out N animals in a single row across the room floor. */
 function animalPosition(index: number, total: number): [number, number, number] {
@@ -67,19 +77,23 @@ function ClickableAnimal({
   );
 }
 
-/**
- * RoomView — a room shell with one animal per leaf-agent child.
- * Click an animal → AgentView for that agent id.
- */
-export function RoomView() {
+function RoomScene({
+  companyId,
+  id,
+}: {
+  companyId: string | undefined;
+  id: string | undefined;
+}) {
   const navigate = useNavigate();
-  const { companyId, id } = useParams<{ companyId: string; id: string }>();
   const { self, parent, children, loading } = useContainerChildren(
     companyId ?? "",
     id ?? null,
   );
   const roomName = self?.name ?? id ?? "Room";
   const liveStatus = useContainerLiveStatus(companyId ?? "", id ?? null);
+  const transitionTo = useZoomInTransition();
+  const isTransitioning = useIsTransitioning();
+  useZoomInEntrance(ROOM_CAMERA, ROOM_LOOKAT);
 
   const showNotFound = !loading && !!id && self === null;
   const backHref = parent
@@ -88,39 +102,64 @@ export function RoomView() {
   const backLabel = parent ? "floor" : "campus";
 
   return (
-    <div className="h-[calc(100vh-0px)] w-full">
-      <Canvas camera={{ position: [6, 5, 7], fov: 45 }} shadows={false} dpr={[1, 2]}>
-        <color attach="background" args={[palette.sky]} />
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[5, 8, 3]} intensity={0.6} />
+    <>
+      <color attach="background" args={[palette.sky]} />
+      <ambientLight intensity={0.7} />
+      <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
-        <ContainerView layer="room" name={roomName} status={liveStatus}>
-          {loading ? (
-            <LoadingOverlay />
-          ) : showNotFound ? (
-            <NotFoundOverlay layer="room" backHref={backHref} backLabel={backLabel} />
-          ) : children.length === 0 ? (
-            <EmptyLayerOverlay layer="room" />
-          ) : (
-            children.map((agent, i) => (
+      <ContainerView layer="room" name={roomName} status={liveStatus}>
+        {loading ? (
+          <LoadingOverlay />
+        ) : showNotFound ? (
+          <NotFoundOverlay layer="room" backHref={backHref} backLabel={backLabel} />
+        ) : children.length === 0 ? (
+          <EmptyLayerOverlay layer="room" />
+        ) : (
+          children.map((agent, i) => {
+            const pos = animalPosition(i, children.length);
+            return (
               <ClickableAnimal
                 key={agent.id}
                 agent={agent}
-                position={animalPosition(i, children.length)}
-                onClick={() => navigate(`/campus/${companyId}/agent/${agent.id}`)}
+                position={pos}
+                onClick={() =>
+                  transitionTo(
+                    new Vector3(pos[0], pos[1] + 0.4, pos[2]),
+                    () => navigate(`/campus/${companyId}/agent/${agent.id}`),
+                  )
+                }
               />
-            ))
-          )}
-        </ContainerView>
+            );
+          })
+        )}
+      </ContainerView>
 
-        <OrbitControls
-          enablePan={false}
-          minDistance={5}
-          maxDistance={16}
-          minPolarAngle={Math.PI / 6}
-          maxPolarAngle={Math.PI / 2.2}
-          target={[0, 0.4, 0]}
-        />
+      <OrbitControls
+        enabled={!isTransitioning}
+        enablePan={false}
+        minDistance={5}
+        maxDistance={16}
+        minPolarAngle={Math.PI / 6}
+        maxPolarAngle={Math.PI / 2.2}
+        target={ROOM_LOOKAT}
+      />
+    </>
+  );
+}
+
+/**
+ * RoomView — a room shell with one animal per leaf-agent child.
+ * Click an animal → dolly the camera toward it, then route into AgentView.
+ */
+export function RoomView() {
+  const { companyId, id } = useParams<{ companyId: string; id: string }>();
+
+  return (
+    <div className="h-[calc(100vh-0px)] w-full">
+      <Canvas camera={{ position: ROOM_CAMERA, fov: 45 }} shadows={false} dpr={[1, 2]}>
+        <ZoomTransitionProvider>
+          <RoomScene companyId={companyId} id={id} />
+        </ZoomTransitionProvider>
       </Canvas>
     </div>
   );
