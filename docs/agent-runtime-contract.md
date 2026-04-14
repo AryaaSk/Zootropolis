@@ -209,19 +209,27 @@ skill installed) knows how to read it.
 ## 4. Folder layout the daemon owns
 
 The agent's folder is the root of its world. Reference layout — defined in
-`packages/agent-runtime/src/folder-bootstrap.ts`:
+`packages/agent-runtime/src/folder-bootstrap.ts` (v1.2):
 
 ```
 <agentRoot>/<agentId>/
-  .claude/         Claude CLI's own session cache (read by --resume)
-  workspace/       Working files, git clones, intermediate scratch
-  skills/          Agent skills; populated on first execute
-    zootropolis-paperclip.md   <-- the Paperclip protocol skill (Phase D2)
-  CLAUDE.md        Per-agent system prompt: role + delegation rules
-  memory.md        Durable notebook, agent-edited
-  identity.json    AliasKit creds (mocked in v1; real in v2)
-  runtime.log      Daemon's own log
+  .claude/
+    sessions/                              Claude CLI's own session cache
+    skills/zootropolis-paperclip/
+      SKILL.md                             Paperclip agent-interaction skill
+  workspace/                               Working files, git clones, scratch
+  CLAUDE.md                                Per-agent system prompt
+  memory.md                                Durable notebook, agent-edited
+  runtime.log                              Daemon's own log
 ```
+
+Notes:
+
+- **Skill location matters.** Claude Code discovers per-project skills at
+  `<cwd>/.claude/skills/<name>/SKILL.md`. A plain `skills/foo.md` at the
+  project root is NOT picked up. v1.1 got this wrong; v1.2 is canonical.
+- **No local `identity.json`.** Identity moved to Paperclip's API in v1.2
+  (see §7 below).
 
 Your daemon should:
 
@@ -232,9 +240,10 @@ Your daemon should:
 3. **Persist between sessions** — the folder is the agent's long-term
    memory. Don't blow it away between heartbeats.
 
-`<agentRoot>` defaults to `~/zootropolis/agents/` but can be overridden
-with the `ZOOTROPOLIS_AGENTS_ROOT` env var. For an external daemon you
-choose your own root; just make sure the path is stable for that agent.
+`<agentRoot>` is yours to choose. For dev it could be anywhere local
+(e.g., `~/zootropolis-agent-1/`). In prod, typically a per-VM path like
+`/var/zootropolis/agents/`. The path just needs to be stable for this
+agent so Claude's `--resume` finds its session cache.
 
 ---
 
@@ -284,21 +293,70 @@ the issue to `status="done"`.
 
 ## 7. Identity
 
-When an agent is hired, the `aliaskit_vm` adapter's `onHireApproved` hook
-writes an `identity.json` into the agent's folder containing email/phone/
-card/TOTP credentials (mocked in v1, real in v2 once AliasKit ships).
+**v1.2:** identity is minted by Paperclip on hire and stored in
+`agents.metadata.zootropolis.aliaskit`. Your daemon fetches it via a
+dedicated HTTP endpoint — it's never written to your filesystem.
 
-For an external daemon, two options:
+### 7.1 Endpoint
 
-- **Daemon-managed folder**: `onHireApproved` cannot reach your remote
-  filesystem. You must call your provisioning API to seed `identity.json`
-  yourself (Paperclip will write to its local `~/zootropolis/agents/<id>/`
-  but that's irrelevant if your daemon is remote).
-- **Bind-mount or HTTP fetch**: Paperclip writes to its local path; your
-  daemon reads from a shared NFS mount or fetches via an HTTP endpoint
-  Paperclip exposes. Out of scope for v1.1 — for now, expect to manage
-  identity provisioning daemon-side until we add a `GET /api/zootropolis/
-  agents/:id/identity` endpoint.
+```
+GET /api/companies/<companyId>/agents/<agentId>/identity
+```
+
+Response body (200):
+
+```jsonc
+{
+  "email": "<slug>@zootropolis-mock.local",
+  "phone": "+15550000000",
+  "card": {
+    "number": "4111111111110000",
+    "expMonth": 12,
+    "expYear": 2029,
+    "cvv": "123",
+    "brand": "visa-mock"
+  },
+  "totpSecret": "<base64>",
+  "createdAt": "ISO-8601",
+  "source": "zootropolis-mock",
+  "note": "Mock identity — set ZOOTROPOLIS_USE_REAL_ALIASKIT=true for real AliasKit."
+}
+```
+
+Error responses:
+
+- `404 {error: "Agent not found"}` — unknown agent or wrong company.
+- `404 {error: "Identity is only available for aliaskit_vm agents..."}` —
+  agent exists but uses a different adapter (containers, claude_local, …).
+- `404 {error: "No identity provisioned..."}` — agent hired before v1.2
+  without metadata; needs re-hiring.
+
+### 7.2 How your daemon uses it
+
+1. Your daemon needs `companyId` at startup (pass as CLI flag / env var
+   alongside `agentId`). The operator knows it from Paperclip's URL.
+2. On boot — or on first heartbeat, whichever — call the endpoint. Cache
+   the result in memory.
+3. When the underlying agent needs to act on the internet (sign up, log
+   in, verify email, etc.), hand it the cached identity. If the agent
+   reports creds are stale, re-fetch.
+4. Do NOT persist to disk by default. If you must (for crash recovery or
+   offline tolerance), scope the file to inside the agent's folder and
+   gitignore it.
+
+### 7.3 Authentication
+
+In `local_trusted` mode (`./scripts/dev.sh` default), the endpoint is open
+— the `assertCompanyAccess` gate auto-passes for board-equivalent local
+requests. In `authenticated` mode, include a bearer token:
+
+```
+Authorization: Bearer <agent-api-key>
+```
+
+The agent's own API key (provisioned in Paperclip) can fetch its own
+identity. Issuing and plumbing that token to the daemon is the operator's
+job at VM boot.
 
 ---
 
@@ -491,6 +549,16 @@ your daemon diverges.
 
 - **v1 (Apr 2026)**: initial spec. Single-tenant per-port, no auth, JSON
   text frames only, hire-to-fire lifetime.
+- **v1.2 (Apr 2026)**: same wire protocol (PROTOCOL_VERSION still = 1,
+  no breaking changes). Folder layout and identity semantics changed:
+  (a) per-project skill moved from `skills/zootropolis-paperclip.md` to
+  `.claude/skills/zootropolis-paperclip/SKILL.md` to match Claude Code's
+  skill-discovery convention; (b) `identity.json` no longer written to
+  the agent's folder — daemons fetch identity via
+  `GET /api/companies/<companyId>/agents/<agentId>/identity` on demand
+  (§7); (c) `companyId` becomes required daemon bootstrap input so
+  daemons can call the identity endpoint.
 
-Future versions will be additive (new optional fields on existing frames)
-or signaled by a new `PROTOCOL_VERSION` in the hello/ready handshake.
+Wire-protocol versions will be additive (new optional fields on existing
+frames) or signaled by a bumped `PROTOCOL_VERSION` in the hello/ready
+handshake.

@@ -143,16 +143,25 @@ claude --resume <sessionId> < wake-payload.json
 
 ```
 <root>/<agent-id>/
-  .claude/          # claude CLI's session cache; managed by claude itself
-  workspace/        # scratch files
-  skills/           # Paperclip auto-writes zootropolis-paperclip.md here
-  CLAUDE.md         # role + delegation rules (you write on bootstrap)
-  memory.md         # durable notebook (you write on bootstrap)
-  identity.json     # AliasKit creds (see §Identity below)
-  runtime.log       # your own log
+  .claude/
+    sessions/                             # managed by claude CLI
+    skills/zootropolis-paperclip/
+      SKILL.md                            # Paperclip agent-interaction skill; you write on bootstrap
+  workspace/                              # scratch files
+  CLAUDE.md                               # role + close-marker reminder; you write on bootstrap
+  memory.md                               # durable notebook; you write on bootstrap
+  runtime.log                             # your own log
 ```
 
 Idempotent bootstrap — if `.claude/` exists, assume bootstrapped and skip.
+
+**No local `identity.json`.** As of v1.2, external daemons fetch their
+AliasKit identity from Paperclip's API (see below). Nothing to seed
+on disk.
+
+**Skill location matters.** Claude Code discovers per-project skills at
+`<cwd>/.claude/skills/<name>/SKILL.md`. A plain `skills/foo.md` at the
+project root is NOT picked up.
 
 `CLAUDE.md` template (you can copy this verbatim):
 
@@ -180,7 +189,17 @@ transitions to done.
 This file persists across heartbeats. Use it for long-term notes.
 ```
 
-`identity.json` template (Paperclip's mock identity shape):
+## Identity — fetch from Paperclip (v1.2+)
+
+Identity (email, phone, card, TOTP) is minted by Paperclip on hire and
+stored in `agents.metadata.zootropolis.aliaskit`. Your daemon fetches it
+whenever it needs to act as a citizen of the internet:
+
+```
+GET http://<paperclip-host>:3100/api/companies/<companyId>/agents/<agentId>/identity
+```
+
+Response (JSON):
 
 ```jsonc
 {
@@ -190,9 +209,21 @@ This file persists across heartbeats. Use it for long-term notes.
   "totpSecret": "<base64>",
   "createdAt": "ISO-8601",
   "source": "zootropolis-mock",
-  "note": "Mock identity. Real AliasKit integration is v1.2."
+  "note": "Mock identity..."
 }
 ```
+
+Recommended pattern: fetch once on daemon boot, cache in memory, re-fetch
+lazily if a workload needs fresh creds. Don't store identity to disk by
+default — if you must, scope to the agent's folder and gitignore it.
+
+Your daemon needs the `companyId` at boot. Simplest path: make it a
+CLI flag or env var the operator passes when they launch the daemon
+(they already know it from Paperclip's URL).
+
+For authenticated deployments, include a bearer token in the `Authorization`
+header; in `local_trusted` mode (`./scripts/dev.sh` default) the endpoint
+is open.
 
 ## Registering your daemon with Paperclip
 
