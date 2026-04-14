@@ -4,8 +4,10 @@ import { Edges, OrbitControls, Text, useCursor } from "@react-three/drei";
 import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
 import { Vector3 } from "three";
+import { CampusEnvironment } from "../components/CampusEnvironment";
 import { CampusOverlay } from "../components/CampusOverlay";
 import { CampusPostFx } from "../components/CampusPostFx";
+import { ContainerInspector } from "../components/ContainerInspector";
 import { ContainerView } from "../components/ContainerView";
 import {
   EmptyLayerOverlay,
@@ -88,7 +90,7 @@ function BuildingScene({
 
   return (
     <>
-      <color attach="background" args={[palette.sky]} />
+      <CampusEnvironment />
       <ambientLight intensity={0.7} />
       <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
@@ -152,6 +154,7 @@ export function BuildingView() {
         </ZoomTransitionProvider>
       </Canvas>
       <CampusOverlay />
+      {companyId && id && <ContainerInspector companyId={companyId} agentId={id} />}
     </div>
   );
 }

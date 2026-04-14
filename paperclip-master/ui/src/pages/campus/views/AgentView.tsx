@@ -3,8 +3,10 @@ import { OrbitControls, Text, Html } from "@react-three/drei";
 import { readZootropolisLayer, type ZootropolisAgentMetadata } from "@paperclipai/shared";
 import { useParams } from "@/lib/router";
 import { Animal } from "../components/Animal";
+import { CampusEnvironment } from "../components/CampusEnvironment";
 import { CampusOverlay } from "../components/CampusOverlay";
 import { CampusPostFx } from "../components/CampusPostFx";
+import { ContainerInspector } from "../components/ContainerInspector";
 import {
   LoadingOverlay,
   NotFoundOverlay,
@@ -48,7 +50,7 @@ function AgentScene({
 
   return (
     <>
-      <color attach="background" args={[palette.sky]} />
+      <CampusEnvironment />
 
       <ambientLight intensity={0.7} />
       <directionalLight position={[5, 8, 3]} intensity={0.6} />
@@ -150,6 +152,7 @@ export function AgentView() {
         </ZoomTransitionProvider>
       </Canvas>
       <CampusOverlay />
+      {companyId && id && <ContainerInspector companyId={companyId} agentId={id} />}
     </div>
   );
 }

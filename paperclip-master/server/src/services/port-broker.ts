@@ -107,6 +107,40 @@ export function portBrokerService(db: Db): PortBroker {
       .then((rows) => rows[0] ?? null);
     if (!row) throw new Error(`Port broker: agent ${agentId} not found`);
 
+    // Phase H2: external-endpoint mode. If the agent's adapterConfig declares
+    // an externalEndpoint (e.g. ws://10.0.0.5:7100/ pointing at a daemon the
+    // user runs themselves on a real VM), the broker DOES NOT spawn a local
+    // daemon. It just records the endpoint as-is so the adapter dials it.
+    // Release becomes a no-op for these agents — the user's controller owns
+    // the daemon's lifecycle.
+    const externalEndpoint = readExternalEndpoint(row);
+    if (externalEndpoint) {
+      const nextAdapterConfig = {
+        ...((row.adapterConfig as Record<string, unknown> | null) ?? {}),
+        runtimeEndpoint: externalEndpoint,
+        // No port to record — the URL is opaque to the broker.
+      };
+      await db
+        .update(agents)
+        .set({ adapterConfig: nextAdapterConfig })
+        .where(eq(agents.id, agentId));
+      logger.info({ agentId, endpoint: externalEndpoint }, "Zootropolis port broker: external endpoint registered");
+      // We don't track external endpoints in `allocations` (no daemon to manage).
+      // The adapter reads runtimeEndpoint from adapterConfig at execute time.
+      return { port: 0, endpoint: externalEndpoint, folder: agentFolderFor(agentId) };
+    }
+
+    // Refuse to spawn an in-process daemon when the operator has demanded
+    // external-only mode. Forces every aliaskit_vm leaf to declare an
+    // externalEndpoint at hire time.
+    if (isExternalOnlyMode()) {
+      throw new Error(
+        `ZOOTROPOLIS_RUNTIME_MODE=external_only requires adapterConfig.externalEndpoint, ` +
+          `but agent ${agentId} has none. Set externalEndpoint at hire time or ` +
+          `via scripts/zootropolis-register-external.ts.`,
+      );
+    }
+
     const previousPort = readPreviousPort(row);
     const port = pickFreePort(previousPort);
     const folder = agentFolderFor(agentId);
@@ -209,4 +243,27 @@ function mergeRuntimeMetadata(metadata: unknown, port: number): Record<string, u
       runtime: { endpoint: endpointFor(port), port },
     },
   };
+}
+
+/**
+ * Phase H2: external-endpoint check. If the agent's adapterConfig declares
+ * `externalEndpoint: "ws://..."`, the broker registers it as the runtime
+ * endpoint without spawning a local daemon. Used for real per-VM isolation
+ * where the user runs the daemon themselves on a separate host.
+ */
+function readExternalEndpoint(row: { adapterConfig: unknown }): string | null {
+  const ac = row.adapterConfig as Record<string, unknown> | null;
+  const v = ac?.externalEndpoint;
+  if (typeof v !== "string") return null;
+  const trimmed = v.trim();
+  if (!trimmed) return null;
+  if (!trimmed.startsWith("ws://") && !trimmed.startsWith("wss://")) {
+    return null;
+  }
+  return trimmed;
+}
+
+function isExternalOnlyMode(): boolean {
+  const v = (process.env.ZOOTROPOLIS_RUNTIME_MODE ?? "").trim().toLowerCase();
+  return v === "external_only";
 }

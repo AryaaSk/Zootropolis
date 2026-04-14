@@ -201,7 +201,15 @@ No VM, no AliasKit identity, no workspace folder, no persistent state beyond the
 
 ### 7c. Leaf agent runtime — folder-as-VM in dev, real VM in prod
 
-The `aliaskit-vm` adapter talks to exactly one thing: a **WebSocket endpoint per agent**. What sits behind that endpoint is swappable. In dev it's a Node daemon running in a folder on the host. In prod it's a real Cua/Coasty VM. Wire protocol is identical — no dev/prod rewrite.
+The `aliaskit-vm` adapter talks to exactly one thing: a **WebSocket endpoint per agent**. What sits behind that endpoint is swappable. In dev it's a Node daemon running in a folder on the host. In prod it's a real Cua/Coasty VM (or any external runtime that implements the protocol). Wire protocol is identical — no dev/prod rewrite.
+
+> **External daemon mode (v1.1).** When `agent.adapterConfig.externalEndpoint`
+> is set, the broker skips the in-process daemon spawn and just records the
+> endpoint as the runtime URL — the adapter dials whatever's at the other
+> end. Full contract for building such a daemon is at
+> [`docs/agent-runtime-contract.md`](../docs/agent-runtime-contract.md).
+> Set `ZOOTROPOLIS_RUNTIME_MODE=external_only` to forbid in-process daemons
+> entirely.
 
 #### Folder-as-VM layout (dev)
 

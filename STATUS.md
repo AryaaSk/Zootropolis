@@ -56,9 +56,35 @@ See `scripts/verify-e2e.md` for the full manual verification script
 
 - Real AliasKit API (mocked).
 - Real noVNC stream in AgentView (placeholder reads runtime/identity from metadata).
-- Real per-VM process isolation (daemons hosted in-process inside the Paperclip server; same WS boundary, just no fork).
 - New entity tables for containers (containers ARE Paperclip agents with a layer tag).
 - Camera-animated transitions across browser routes (only within a single Canvas; cross-route is a fade for now).
+
+## v1.1 status (in-progress)
+
+Promoted from v1's deferred list:
+
+- **Real per-VM process isolation** — supported via the external-daemon
+  contract documented in [`docs/agent-runtime-contract.md`](docs/agent-runtime-contract.md).
+  Set `agent.adapterConfig.externalEndpoint = "ws://your-vm:port/"` at hire
+  time (or via `scripts/zootropolis-register-external.ts` after the fact),
+  and the broker stops spawning an in-process daemon for that agent. To
+  forbid in-process daemons entirely, set `ZOOTROPOLIS_RUNTIME_MODE=external_only`.
+  The user is building the daemon side of this; the server contract is stable.
+- **Leaf agents can actually close issues** (Phase D1 + D2). They emit a
+  JSON close marker on their last stdout line; the server recognises it,
+  posts the artifact as a comment, and transitions the issue to `done`.
+  The daemon now also injects a `zootropolis-paperclip` skill into each
+  agent's `skills/` directory on first execute, telling the agent how to
+  use the convention.
+
+In flight (this branch):
+
+- Interactive campus (Phase E): drawer with delegated/owed issues, embedded
+  issue quicklook, live transcript inside AgentView.
+- Bottom-up tree creation (Phase F): hire agents/rooms/floors/buildings
+  from inside the campus; "wrap in" promote.
+- Visual upgrade (Phase G): procedural shaders + idle micro-animations
+  (shipped); per-window flicker, sky+fog, GLB decorations (in flight).
 
 Each of these graduates by swapping one piece — the architecture is
 already shaped so they're additive, not rewrites.
