@@ -1470,6 +1470,31 @@ export function agentRoutes(db: Db) {
       createInput.adapterType,
       ((createInput.adapterConfig ?? {}) as Record<string, unknown>),
     );
+    // Zootropolis (Phase I1): aliaskit_vm agents represent real external
+    // runtimes (VMs, containers, long-lived daemons) — Paperclip never
+    // provisions them. Require the operator to supply a WebSocket URL at
+    // hire time. Normalise: if only externalEndpoint is set, copy it to
+    // runtimeEndpoint (the adapter reads the latter).
+    if (createInput.adapterType === "aliaskit_vm") {
+      const extRaw = requestedAdapterConfig.externalEndpoint;
+      const rtRaw = requestedAdapterConfig.runtimeEndpoint;
+      const ext = typeof extRaw === "string" ? extRaw.trim() : "";
+      const rt = typeof rtRaw === "string" ? rtRaw.trim() : "";
+      const endpoint = ext || rt;
+      const isWs = endpoint.startsWith("ws://") || endpoint.startsWith("wss://");
+      if (!endpoint || !isWs) {
+        res.status(400).json({
+          error:
+            "aliaskit_vm agents require adapterConfig.externalEndpoint " +
+            "(ws:// or wss://) at hire time. Provide your daemon's URL " +
+            "in the hire form.",
+        });
+        return;
+      }
+      // Canonicalise: both fields carry the URL; the adapter reads runtimeEndpoint.
+      requestedAdapterConfig.externalEndpoint = endpoint;
+      requestedAdapterConfig.runtimeEndpoint = endpoint;
+    }
     const desiredSkillAssignment = await resolveDesiredSkillAssignment(
       companyId,
       createInput.adapterType,
@@ -1537,22 +1562,13 @@ export function agentRoutes(db: Db) {
       );
     }
 
-    // Zootropolis: aliaskit_vm leaves get a port + folder + daemon at hire,
-    // and an AliasKit identity (mocked in v1) materialised into the folder.
+    // Zootropolis (Phase I1): hiring no longer auto-spawns a daemon — the
+    // operator has already supplied an external endpoint (validated above).
+    // We just fire the adapter's onHireApproved hook so mock identity
+    // (email/phone/card) is materialised into the agent's folder. In
+    // Paperclip's normal flow this fires on approval-grant; in local_trusted
+    // dev mode there's no approval, so we synthesize a "local_implicit" one.
     if (agent.adapterType === "aliaskit_vm") {
-      try {
-        await getPortBroker(db).allocate(agent.id);
-      } catch (err) {
-        // Don't block the create; broker errors shouldn't 500 the request.
-        // The adapter test endpoint will surface the bad runtime endpoint.
-        console.warn(
-          `Zootropolis port broker: failed to allocate for ${agent.id}:`,
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-      // Run the adapter's onHireApproved hook directly. In Paperclip's normal
-      // flow this fires on approval-grant; in local_trusted dev mode there's
-      // no approval, so we synthesize a "local_implicit" approval here.
       const adapter = findActiveServerAdapter("aliaskit_vm");
       if (adapter?.onHireApproved) {
         try {
