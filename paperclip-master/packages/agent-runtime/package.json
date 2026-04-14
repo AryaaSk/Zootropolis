@@ -1,0 +1,31 @@
+{
+  "name": "@paperclipai/agent-runtime",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./daemon": "./src/daemon.ts"
+  },
+  "bin": {
+    "agent-runtime": "./bin/agent-runtime"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/daemon.ts"
+  },
+  "dependencies": {
+    "@paperclipai/adapter-aliaskit-vm": "workspace:*",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

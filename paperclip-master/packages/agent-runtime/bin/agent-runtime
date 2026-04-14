@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+// CLI entry: forwards to the daemon's runFromCli with argv. Built TS form
+// is dist/daemon.js; for dev mode the package.json scripts use tsx.
+import { runFromCli } from "../dist/daemon.js";
+runFromCli(process.argv.slice(2));
