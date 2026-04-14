@@ -377,6 +377,27 @@ export function OnboardingWizard() {
     }
   }
 
+  /**
+   * Zootropolis path: create the company with just a name, skip the
+   * default top-down agent/task/launch flow, land the user in the 3D
+   * campus where bottom-up hiring happens.
+   */
+  async function handleStep1SkipToCampus() {
+    setLoading(true);
+    setError(null);
+    try {
+      const company = await companiesApi.create({ name: companyName.trim() });
+      setSelectedCompanyId(company.id);
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
+      reset();
+      closeOnboarding();
+      navigate(`/campus/${company.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create company");
+      setLoading(false);
+    }
+  }
+
   async function handleStep1Next() {
     setLoading(true);
     setError(null);
@@ -1202,18 +1223,29 @@ export function OnboardingWizard() {
                 </div>
                 <div className="flex items-center gap-2">
                   {step === 1 && (
-                    <Button
-                      size="sm"
-                      disabled={!companyName.trim() || loading}
-                      onClick={handleStep1Next}
-                    >
-                      {loading ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                      ) : (
-                        <ArrowRight className="h-3.5 w-3.5 mr-1" />
-                      )}
-                      {loading ? "Creating..." : "Next"}
-                    </Button>
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!companyName.trim() || loading}
+                        onClick={handleStep1SkipToCampus}
+                        title="Create the company and jump straight to the 3D campus. Zootropolis-friendly: no CEO agent gets hired up-front."
+                      >
+                        Skip: go to campus
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={!companyName.trim() || loading}
+                        onClick={handleStep1Next}
+                      >
+                        {loading ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        ) : (
+                          <ArrowRight className="h-3.5 w-3.5 mr-1" />
+                        )}
+                        {loading ? "Creating..." : "Next"}
+                      </Button>
+                    </>
                   )}
                   {step === 2 && (
                     <Button
