@@ -23,8 +23,12 @@ export function HireAgentButton() {
   if (!companyId) return null;
 
   return (
+    // Positioned below the Minimap (which lives at top-4 right-4 and is
+    // ~180px tall). top-52 (208px) keeps us clear with a little gap.
+    // If the Minimap ever grows/shrinks, adjust in tandem or consider
+    // wrapping both in a flex column in CampusOverlay.
     <div
-      className="pointer-events-none absolute right-4 top-16 z-10"
+      className="pointer-events-none absolute right-4 top-52 z-10"
       style={{ width: open ? 280 : "auto" }}
     >
       {open ? (
