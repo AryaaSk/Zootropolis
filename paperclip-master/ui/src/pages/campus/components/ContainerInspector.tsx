@@ -99,7 +99,7 @@ interface ContainerInspectorProps {
   agentId: string | null;
   /** Optional: hide the hire footer (F1 CampusView handles empty-state itself). */
   hideHireFooter?: boolean;
-  /** Start collapsed? Default: open. */
+  /** Start open? Default: closed (user clicks the chevron to peek). */
   defaultOpen?: boolean;
 }
 
@@ -131,7 +131,7 @@ export function ContainerInspector({
   companyId,
   agentId,
   hideHireFooter = false,
-  defaultOpen = true,
+  defaultOpen = false,
 }: ContainerInspectorProps) {
   const [open, setOpen] = useState(defaultOpen);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
