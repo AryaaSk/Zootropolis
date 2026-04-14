@@ -5,6 +5,7 @@ import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
 import { Vector3 } from "three";
 import { BuildingWindows } from "../components/BuildingWindows";
+import { CampusDecorations } from "../components/CampusDecorations";
 import { CampusEnvironment } from "../components/CampusEnvironment";
 import { CampusOverlay } from "../components/CampusOverlay";
 import { CampusPostFx } from "../components/CampusPostFx";
@@ -153,6 +154,8 @@ function CampusScene({ companyId }: { companyId: string | undefined }) {
           })
         )}
       </ContainerView>
+
+      <CampusDecorations layer="campus" companyId={companyId} parentId={null} />
 
       <OrbitControls
         enabled={!isTransitioning}
