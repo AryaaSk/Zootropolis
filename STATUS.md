@@ -136,3 +136,36 @@ All 17 v1.1 phases shipped on `work/zootropolis-v1` (commits `19b44d2..d0a2fd6`)
 
 Each of these graduates by swapping one piece — the architecture is
 already shaped so they're additive, not rewrites.
+
+## v1.3 — right-layer landing + persistent Hire
+
+**Per-child archetype at the campus root (Phase N1)**
+- New `<RootArchetype>` dispatcher renders each top-level child by its
+  `metadata.zootropolis.layer`: agents as animals, rooms as walled
+  shells, floors as slabs, buildings as full GLB buildings, campus
+  containers as small tower clusters. No more ghost towers for lone
+  leaves.
+
+**Auto-redirect to the highest-populated layer (Phase N2)**
+- When `/campus/:companyId` has exactly one root, `<Navigate replace />`
+  into that root's layer view (`/agent/:id`, `/room/:id`, …). Zero
+  roots → empty state. Two-plus roots → campus view with mixed-layer
+  archetypes.
+
+**Persistent "+ Hire agent" button (Phase N3)**
+- `<HireAgentButton>` in the top-right overlay, always visible at every
+  zoom layer. Reuses the existing `HireForm`, so the required WebSocket
+  endpoint field + server-side I1 validation come along for free.
+
+**Re-parent & issue delegation semantics (Phase N4)**
+- Moving an agent's `reportsTo` (via Wrap-in or Add-to-existing) does
+  NOT invalidate already-existing issues. The strict delegation rule
+  (Phase A1) is point-in-time: it's enforced at issue creation, not as
+  a persistent relationship. After a move:
+  - existing issues keep flowing — old parent can still see them as
+    "Tasks delegated", the agent keeps executing.
+  - new issues from the old parent → rejected 409 (correct: A no
+    longer reports to the old room).
+  - new issues from the new parent → accepted.
+- No code change needed; this is the intended behaviour of the rule.
+  Documented here so re-parent surprises don't look like bugs.

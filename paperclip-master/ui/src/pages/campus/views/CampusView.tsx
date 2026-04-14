@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Text, useCursor } from "@react-three/drei";
-import { useNavigate, useParams } from "@/lib/router";
+import { Navigate, useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
 import { Vector3 } from "three";
-import { BuildingWindows } from "../components/BuildingWindows";
-import { BuildingModel } from "../components/models/BuildingModel";
+import { RootArchetype, routeForLayer } from "../components/RootArchetype";
+import { readZootropolisLayer } from "@paperclipai/shared";
 import { CampusDecorations } from "../components/CampusDecorations";
 import { CampusEnvironment } from "../components/CampusEnvironment";
 import { CampusOverlay } from "../components/CampusOverlay";
@@ -38,71 +38,10 @@ function buildingPosition(index: number, total: number): [number, number, number
   return [x, 0, z];
 }
 
-function BuildingPlaceholder({
-  agent,
-  position,
-  companyId,
-  onClick,
-}: {
-  agent: Agent;
-  position: [number, number, number];
-  companyId: string | undefined;
-  onClick: () => void;
-}) {
-  const [hovered, setHovered] = useState(false);
-  useCursor(hovered);
-  const [x, y, z] = position;
-  const lift = hovered ? 0.2 : 0;
-  // B5 live status for this building — drives emissive window glow.
-  const buildingStatus = useContainerLiveStatus(companyId ?? "", agent.id);
-  const windowsActive = buildingStatus === "running";
-  // G4: intensity scales window lit-count + emissive brightness. We don't
-  // yet have a per-descendant running count on this hook; mapping the
-  // coarse running/idle flag to 1.0 / 0.15 gives a clear brightness swing
-  // that still reads as "busier = brighter".
-  const windowsIntensity = windowsActive ? 1.0 : 0.15;
-
-  return (
-    <group
-      position={[x, y + lift, z]}
-      onPointerOver={(e) => {
-        e.stopPropagation();
-        setHovered(true);
-      }}
-      onPointerOut={() => setHovered(false)}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-    >
-      {/* K3: GLB-backed body (replaces procedural box+roof). Variant is
-          hashed from agent id so each building has a stable silhouette.
-          Falls back to the pre-K3 procedural shell on Suspense or lq=1. */}
-      <BuildingModel agentId={agent.id} />
-      {/* Emissive window grid on the +z front face. Bloom (via CampusPostFx)
-          turns these into a soft glow when the building has running work. */}
-      <BuildingWindows
-        width={3}
-        height={3.2}
-        y={1.6}
-        z={1.5}
-        active={windowsActive}
-        intensity={windowsIntensity}
-        seed={agent.id}
-      />
-      <Text
-        position={[0, 0.05, 1.8]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        fontSize={0.32}
-        color={palette.ink}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {agent.name}
-      </Text>
-    </group>
-  );
-}
+// Phase N1: BuildingPlaceholder replaced by RootArchetype dispatcher in
+// ../components/RootArchetype.tsx. The dispatcher picks the right 3D
+// archetype per child based on metadata.zootropolis.layer so a lone leaf
+// no longer renders as a ghost tower.
 
 function CampusScene({ companyId }: { companyId: string | undefined }) {
   const navigate = useNavigate();
@@ -127,19 +66,27 @@ function CampusScene({ companyId }: { companyId: string | undefined }) {
           // the 3D scene stays as an empty grass plane (ContainerView shell).
           null
         ) : (
+          // Phase N1: dispatch per child on its metadata.zootropolis.layer
+          // so a lone leaf renders as an animal, a standalone room as a room
+          // shell, etc. — rather than always as a building.
           children.map((agent, i) => {
             const pos = buildingPosition(i, children.length);
+            const childLayer = readZootropolisLayer(agent.metadata);
+            const route = routeForLayer(childLayer);
             return (
-              <BuildingPlaceholder
+              <RootArchetype
                 key={agent.id}
                 agent={agent}
                 position={pos}
                 companyId={companyId}
                 onClick={() =>
                   transitionTo(
-                    // Aim at building-body centroid, not the ground pad.
                     new Vector3(pos[0], pos[1] + 1.6, pos[2]),
-                    () => navigate(`/campus/${companyId}/building/${agent.id}`),
+                    () => {
+                      if (route) {
+                        navigate(`/campus/${companyId}/${route}/${agent.id}`);
+                      }
+                    },
                   )
                 }
               />
@@ -216,13 +163,33 @@ function CampusEmptyState({ companyId }: { companyId: string }) {
 }
 
 /**
- * CampusView — a ground plane with one building per campus-layer root agent.
- * Click → dolly the camera toward the building, then route into BuildingView.
+ * CampusView — a ground plane with one tile per top-level agent. Dispatches
+ * each child to the right 3D archetype (building / room / animal / …) via
+ * <RootArchetype> so a lone leaf doesn't render as a ghost tower.
+ *
+ * Phase N2: when there is exactly ONE root, redirect to its own view
+ * (`/agent/:id`, `/room/:id`, etc.) — "only display the highest level of
+ * hierarchy which is actually present". Empty state stays on CampusView;
+ * multi-root stays on CampusView (the archetype dispatcher handles
+ * heterogeneous layers).
  */
 export function CampusView() {
   const { companyId } = useParams<{ companyId: string }>();
   const { children, loading } = useContainerChildren(companyId ?? "", null);
   const isEmpty = !loading && children.length === 0;
+
+  // N2 redirect. Run only after the query finishes so we don't redirect
+  // mid-loading with stale data.
+  if (!loading && children.length === 1 && companyId) {
+    const only = children[0];
+    const onlyLayer = readZootropolisLayer(only.metadata);
+    const route = routeForLayer(onlyLayer);
+    if (route) {
+      return <Navigate to={`/campus/${companyId}/${route}/${only.id}`} replace />;
+    }
+    // Campus-layer single-root: the root IS the canvas; fall through and
+    // render CampusView normally.
+  }
 
   return (
     <div className="relative h-[calc(100vh-0px)] w-full">
