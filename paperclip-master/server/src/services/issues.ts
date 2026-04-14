@@ -67,6 +67,12 @@ function applyStatusSideEffects(
 export interface IssueFilters {
   status?: string;
   assigneeAgentId?: string;
+  /**
+   * Zootropolis: filter issues by the agent that CREATED them (i.e. delegated
+   * them downward). Composes with `requesterAgentId` visibility scoping via AND
+   * — the caller remains visibility-constrained on top of this filter.
+   */
+  createdByAgentId?: string;
   participantAgentId?: string;
   assigneeUserId?: string;
   touchedByUserId?: string;
@@ -1013,6 +1019,9 @@ export function issueService(db: Db) {
       }
       if (filters?.assigneeAgentId) {
         conditions.push(eq(issues.assigneeAgentId, filters.assigneeAgentId));
+      }
+      if (filters?.createdByAgentId) {
+        conditions.push(eq(issues.createdByAgentId, filters.createdByAgentId));
       }
       if (filters?.participantAgentId) {
         conditions.push(participatedByAgentCondition(companyId, filters.participantAgentId));
