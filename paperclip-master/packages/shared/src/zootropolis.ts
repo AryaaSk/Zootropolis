@@ -45,15 +45,6 @@ export interface ZootropolisRuntime {
 }
 
 /**
- * Public-safe handles for the AliasKit identity provisioned to a leaf at
- * hire time. Secrets (card number, TOTP) live only in the agent's folder.
- */
-export interface ZootropolisAliasHandles {
-  email?: string;
-  phone?: string;
-}
-
-/**
  * Phase T — stored spatial position. One of four discriminated kinds
  * depending on the layer the agent lives in:
  *   - `hex`       — campus root children (island tiles)
@@ -74,12 +65,17 @@ export type ZootropolisPos =
 /**
  * Shape stored at `agents.metadata.zootropolis`. All fields optional so
  * existing Paperclip agents (without Zootropolis metadata) keep working.
+ *
+ * Phase Z — identity is no longer a server concern. Remote workers (leaf
+ * agents behind aliaskit_vm daemons) provision and own their own
+ * AliasKit identity via a skill installed locally on their VM; the
+ * server only tracks the agent's position in the company org chart
+ * (layer, displayName, runtime endpoint, spatial pos).
  */
 export interface ZootropolisAgentMetadata {
   layer?: ZootropolisLayer;
   displayName?: string;
   runtime?: ZootropolisRuntime;
-  aliaskit?: ZootropolisAliasHandles;
   pos?: ZootropolisPos;
 }
 

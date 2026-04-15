@@ -58,7 +58,6 @@ import {
 import {
   execute as aliaskitVmExecute,
   testEnvironment as aliaskitVmTestEnvironment,
-  onHireApproved as aliaskitVmOnHireApproved,
 } from "@paperclipai/adapter-aliaskit-vm/server";
 import {
   agentConfigurationDoc as aliaskitVmAgentConfigurationDoc,
@@ -165,7 +164,9 @@ const aliaskitVmAdapter: ServerAdapterModule = {
   type: "aliaskit_vm",
   execute: aliaskitVmExecute,
   testEnvironment: aliaskitVmTestEnvironment,
-  onHireApproved: aliaskitVmOnHireApproved,
+  // Phase Z: no onHireApproved hook. Remote workers manage their own
+  // AliasKit identity locally on their VM; Paperclip doesn't provision
+  // or know about it.
   models: aliaskitVmModels,
   supportsLocalAgentJwt: false,
   agentConfigurationDoc: aliaskitVmAgentConfigurationDoc,

@@ -16,16 +16,6 @@
           "description": "Enforce strict parent↔child issue assignment and per-agent issue visibility. Maps to ZOOTROPOLIS_DELEGATION_STRICT."
         }
       }
-    },
-    "aliaskit": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "useReal": {
-          "type": "boolean",
-          "description": "Wire the real AliasKit API for identity provisioning. Default false = mock identities embedded in agents.metadata.zootropolis.aliaskit and served via GET /api/companies/:id/agents/:id/identity. Maps to ZOOTROPOLIS_USE_REAL_ALIASKIT."
-        }
-      }
     }
   }
 }

@@ -648,7 +648,6 @@ export {
   type ZootropolisLayer,
   type ZootropolisWrappableLayer,
   type ZootropolisRuntime,
-  type ZootropolisAliasHandles,
   type ZootropolisAgentMetadata,
   type ZootropolisPos,
   type ZootropolisCloseMarker,

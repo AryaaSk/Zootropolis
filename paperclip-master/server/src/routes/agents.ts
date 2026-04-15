@@ -60,7 +60,6 @@ import { redactCurrentUserValue } from "../log-redaction.js";
 import { renderOrgChartSvg, renderOrgChartPng, type OrgNode, type OrgChartStyle, ORG_CHART_STYLES } from "./org-chart-svg.js";
 import { instanceSettingsService } from "../services/instance-settings.js";
 import { runClaudeLogin } from "@paperclipai/adapter-claude-local/server";
-import { mockIdentityFor } from "@paperclipai/adapter-aliaskit-vm/server";
 import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
@@ -861,46 +860,13 @@ export function agentRoutes(db: Db) {
     res.json(result);
   });
 
-  // Phase L (v1.2): external daemons fetch their AliasKit identity here
-  // on boot. Only aliaskit_vm agents have identities; others return 404.
-  // Auth via the usual company-access gate (board / local_trusted / agent
-  // membership). In prod the daemon should pass its agent API key so only
-  // the agent itself — and the board — can fetch.
-  router.get("/companies/:companyId/agents/:id/identity", async (req, res) => {
-    const companyId = req.params.companyId as string;
-    assertCompanyAccess(req, companyId);
-    const id = req.params.id as string;
-    const agent = await svc.getById(id);
-    if (!agent) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
-    if (agent.companyId !== companyId) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
-    if (agent.adapterType !== "aliaskit_vm") {
-      res.status(404).json({
-        error:
-          "Identity is only available for aliaskit_vm agents. Container " +
-          "and other adapter types have no external identity.",
-      });
-      return;
-    }
-    const metadata = (agent.metadata as Record<string, unknown> | null) ?? {};
-    const zoot = (metadata.zootropolis as Record<string, unknown> | null) ?? {};
-    const identity = zoot.aliaskit;
-    if (!identity) {
-      res.status(404).json({
-        error:
-          "No identity provisioned for this agent. If the agent was " +
-          "hired before v1.2 it may need to be recreated, or set " +
-          "metadata.zootropolis.aliaskit manually.",
-      });
-      return;
-    }
-    res.json(identity);
-  });
+  // Phase Z — identity is no longer Paperclip's concern. The old
+  // `GET /companies/:id/agents/:id/identity` route lived here; it's been
+  // removed. Remote workers (leaf agents) provision and manage their own
+  // AliasKit identity via a skill installed locally on their VM. What
+  // they present to the outside world is entirely their business; the
+  // Paperclip server only knows each agent's POSITION in the company
+  // org chart, not their "who am I on the internet" persona.
 
   router.get("/agents/:id/skills", async (req, res) => {
     const id = req.params.id as string;
@@ -1642,65 +1608,12 @@ export function agentRoutes(db: Db) {
       );
     }
 
-    // Zootropolis (Phase I1): hiring no longer auto-spawns a daemon — the
-    // operator has already supplied an external endpoint (validated above).
-    // We just fire the adapter's onHireApproved hook so mock identity
-    // (email/phone/card) is materialised into the agent's folder. In
-    // Paperclip's normal flow this fires on approval-grant; in local_trusted
-    // dev mode there's no approval, so we synthesize a "local_implicit" one.
-    if (agent.adapterType === "aliaskit_vm") {
-      // Phase P4 — mint mock AliasKit identity using the agent's real
-      // name as the email-slug basis. Runs AFTER svc.create so the
-      // agentId exists. Skipped if metadata.zootropolis.aliaskit was
-      // already supplied in the create body (future path for
-      // pre-provisioned real identities).
-      const existingMeta = (agent.metadata as Record<string, unknown> | null) ?? {};
-      const existingZ = (existingMeta.zootropolis as Record<string, unknown> | null) ?? {};
-      if (!existingZ.aliaskit) {
-        try {
-          const identity = mockIdentityFor(agent.name || agent.id);
-          const nextMetadata = {
-            ...existingMeta,
-            zootropolis: {
-              ...existingZ,
-              aliaskit: identity,
-            },
-          };
-          await svc.update(agent.id, { metadata: nextMetadata });
-          // Reflect the write on the in-memory agent we're about to return.
-          (agent as { metadata: Record<string, unknown> | null }).metadata = nextMetadata;
-        } catch (err) {
-          console.warn(
-            `Zootropolis: failed to mint AliasKit identity for ${agent.id}:`,
-            err instanceof Error ? err.message : String(err),
-          );
-        }
-      }
-
-      const adapter = findActiveServerAdapter("aliaskit_vm");
-      if (adapter?.onHireApproved) {
-        try {
-          await adapter.onHireApproved(
-            {
-              companyId,
-              agentId: agent.id,
-              agentName: agent.name,
-              adapterType: "aliaskit_vm",
-              source: "approval",
-              sourceId: `local-${agent.id}`,
-              approvedAt: new Date().toISOString(),
-              message: "Local trusted hire — no human approval required.",
-            },
-            (agent.adapterConfig ?? {}) as Record<string, unknown>,
-          );
-        } catch (err) {
-          console.warn(
-            `Zootropolis: aliaskit_vm.onHireApproved failed for ${agent.id}:`,
-            err instanceof Error ? err.message : String(err),
-          );
-        }
-      }
-    }
+    // Phase Z — the server no longer mints AliasKit identities for leaf
+    // agents. Remote workers (behind aliaskit_vm daemons) run their own
+    // AliasKit skill locally on their VM and present whatever persona
+    // they own. The server only cares about the agent's POSITION in the
+    // company org chart (name, layer, reportsTo), not "who the worker is
+    // on the internet."
 
     res.status(201).json(agent);
   });

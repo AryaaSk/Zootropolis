@@ -130,13 +130,13 @@ The full WebSocket protocol is documented in `docs/agent-runtime-contract.md`. T
 
 - **Geography.** A leaf can run on a cheap VPS in another region while the orchestration sits on your laptop. Or vice versa — Paperclip in prod, leaves on local dev machines for fast iteration.
 - **Isolation.** Each leaf gets its own fresh VM. No accidental file-system collisions between agents working on different issues. No "agent X corrupted agent Y's git state" failure modes.
-- **Identity per agent.** Each leaf is provisioned a real **AliasKit identity** — email inbox, phone number, virtual payment card. The agent can sign up for services, receive verification codes, and complete purchases as its own person, not as you. Persistent across heartbeats.
+- **Identity lives on the worker, not the server.** Each leaf (= each remote worker) runs a local **AliasKit skill** that owns its email inbox, phone number, virtual payment card, TOTP, etc. Paperclip never provisions, stores, or knows the worker's external-world identity — the worker is just a WebSocket endpoint with an adapter-type tag. Because identity is tied to the *worker*, the same identity follows the worker across every company they power (like a real contractor with one email across clients).
 - **Substitutability.** The WebSocket contract is the only API. Any tool that speaks it can be a leaf — Claude Code today, Codex tomorrow, a custom Pi agent, a human-in-the-loop console. The Paperclip server doesn't care.
 - **Trust boundary.** The leaf only ever sees its own wake payload + the heartbeat-context it explicitly fetches. It can't read other agents' state. The server is the trust root.
 
 This is the change that makes Zootropolis feel less like "a Claude Code wrapper" and more like "a distributed multi-agent operating system" — leaves are independent processes that happen to coordinate through the Paperclip control plane.
 
-The runtime config for each leaf includes its `runtimeEndpoint` (the WebSocket URL) and an `AliasKit` identity bundle (email, phone, card). The campus 3D view shows reachability state for each leaf with a red ring on the animal if its daemon isn't responding.
+The runtime config for each leaf is just its `runtimeEndpoint` (the WebSocket URL). Everything else — what identity it presents, what skills it has, what credentials it holds — lives on the worker's own VM and is entirely the worker's concern. The campus 3D view shows reachability state for each leaf with a red ring on the animal if its daemon isn't responding.
 
 ---
 
@@ -172,8 +172,9 @@ So Zootropolis is best described as: **a distributed organisation simulator buil
 | Container close-marker gate | `paperclip-master/server/src/services/heartbeat.ts` (Phase R/S close-gate logic) |
 | Container `AGENTS.md` template | `paperclip-master/server/src/onboarding-assets/zootropolis-container/AGENTS.md` |
 | External-leaf WebSocket contract | `docs/agent-runtime-contract.md` |
-| AliasKit integration + identity | `docs/external-daemon-quickstart.md` + `aliaskit_vm` adapter |
-| Zootropolis-specific runtime knobs | `zootropolis.config.json` (currently: `delegation.strict`, `aliaskit.useReal`) |
+| External worker / WebSocket daemon | `docs/external-daemon-quickstart.md` + `aliaskit_vm` adapter (name historical; adapter is now just "connect-to-external-WebSocket") |
+| Worker-side AliasKit identity (skill, not server) | Lives on the VM running each leaf daemon; not bundled or provisioned by the server |
+| Zootropolis-specific runtime knobs | `zootropolis.config.json` (currently: `delegation.strict`) |
 | Dev wrapper | `scripts/dev.sh` (boots server :3100 + UI :5173, points `PAPERCLIP_HOME` at the in-repo `.paperclip/`) |
 
 ---

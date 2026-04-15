@@ -327,7 +327,8 @@ function LeafAgentBody({
 }) {
   const { openNewIssue } = useDialog();
   const runtime = metadata?.runtime;
-  const aliasEmail = metadata?.aliaskit?.email;
+  // Phase Z — identity is worker-managed on the VM, no longer visible
+  // to the server. Only the runtime endpoint is shown here.
 
   return (
     <>
@@ -336,7 +337,6 @@ function LeafAgentBody({
           <div className="space-y-0.5 px-4 pb-3 font-mono text-[11px] text-foreground/90">
             <div>endpoint: {runtime.endpoint}</div>
             <div>port: {runtime.port}</div>
-            {aliasEmail && <div>identity: {aliasEmail}</div>}
           </div>
         ) : (
           <EmptyRow>No runtime metadata (not a Zootropolis leaf)</EmptyRow>

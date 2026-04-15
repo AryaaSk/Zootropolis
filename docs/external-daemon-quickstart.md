@@ -155,9 +155,13 @@ claude --resume <sessionId> < wake-payload.json
 
 Idempotent bootstrap — if `.claude/` exists, assume bootstrapped and skip.
 
-**No local `identity.json`.** As of v1.2, external daemons fetch their
-AliasKit identity from Paperclip's API (see below). Nothing to seed
-on disk.
+**Identity is worker-side, not Paperclip-side (Phase Z).** Your daemon
+does NOT fetch any identity from Paperclip. Instead, each remote
+worker runs its own AliasKit skill locally that owns its external-world
+persona (email / phone / card / TOTP). The same identity follows the
+worker across every company it powers. Install / configure the
+AliasKit skill on the VM alongside this daemon; invoke it from Claude
+when a task needs internet credentials.
 
 **Skill location matters.** Claude Code discovers per-project skills at
 `<cwd>/.claude/skills/<name>/SKILL.md`. A plain `skills/foo.md` at the
@@ -189,41 +193,27 @@ transitions to done.
 This file persists across heartbeats. Use it for long-term notes.
 ```
 
-## Identity — fetch from Paperclip (v1.2+)
+## Identity — worker-managed (Phase Z)
 
-Identity (email, phone, card, TOTP) is minted by Paperclip on hire and
-stored in `agents.metadata.zootropolis.aliaskit`. Your daemon fetches it
-whenever it needs to act as a citizen of the internet:
+Paperclip **no longer** provisions or serves AliasKit identity for leaf
+agents. The old `GET /api/companies/:id/agents/:id/identity` route is
+removed; the `agents.metadata.zootropolis.aliaskit` field is gone from
+the schema. There is nothing to fetch and no `companyId` required by
+the daemon itself.
 
-```
-GET http://<paperclip-host>:3100/api/companies/<companyId>/agents/<agentId>/identity
-```
+Instead:
 
-Response (JSON):
+- Install a local **AliasKit skill** on the VM that hosts this daemon.
+  The skill owns the credentials (email, phone, card, TOTP) the worker
+  presents to the outside world.
+- When a task requires those credentials, Claude invokes the local
+  skill — it doesn't reach back to Paperclip.
+- The same AliasKit identity stays with the worker across every
+  company/agent-wrapper it powers. One worker = one internet persona.
 
-```jsonc
-{
-  "email": "<slug>@zootropolis-mock.local",
-  "phone": "+15550000000",
-  "card": { "number": "4111111111110000", "expMonth": 12, "expYear": 2029, "cvv": "123", "brand": "visa-mock" },
-  "totpSecret": "<base64>",
-  "createdAt": "ISO-8601",
-  "source": "zootropolis-mock",
-  "note": "Mock identity..."
-}
-```
-
-Recommended pattern: fetch once on daemon boot, cache in memory, re-fetch
-lazily if a workload needs fresh creds. Don't store identity to disk by
-default — if you must, scope to the agent's folder and gitignore it.
-
-Your daemon needs the `companyId` at boot. Simplest path: make it a
-CLI flag or env var the operator passes when they launch the daemon
-(they already know it from Paperclip's URL).
-
-For authenticated deployments, include a bearer token in the `Authorization`
-header; in `local_trusted` mode (`./scripts/dev.sh` default) the endpoint
-is open.
+This matches the real-world analogy: a contractor working for 5
+companies doesn't have 5 different email addresses. They have their
+own, and they bring it along.
 
 ## Registering your daemon with Paperclip
 
@@ -252,8 +242,6 @@ unreachable. Make sure your `hello → ready` handshake responds quickly.
 ## What your daemon MUST NOT do
 
 - Don't interpret the wake payload.
-- Don't modify `identity.json` (it's the operator's — you just make sure it
-  exists in the folder; Paperclip's hire hook writes the content).
 - Don't share a WebSocket across agents. One WS per agent per heartbeat.
 - Don't buffer streams — send every stdout chunk as it arrives.
 

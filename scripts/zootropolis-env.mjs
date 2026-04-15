@@ -45,11 +45,8 @@ emit(
     : cfg?.delegation?.strict === false ? "false"
     : undefined,
 );
-emit(
-  "ZOOTROPOLIS_USE_REAL_ALIASKIT",
-  cfg?.aliaskit?.useReal === true ? "true"
-    : cfg?.aliaskit?.useReal === false ? "false"
-    : undefined,
-);
+// Phase Z — aliaskit.useReal removed. Identity is no longer a server
+// concern; remote workers (leaf agents) run their own AliasKit skill
+// locally on their VM.
 
 process.stdout.write(out.join("\n") + (out.length > 0 ? "\n" : ""));
