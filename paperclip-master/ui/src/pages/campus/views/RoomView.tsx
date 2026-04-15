@@ -1,11 +1,23 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Text, useCursor } from "@react-three/drei";
+import { Bounds, Text, useCursor } from "@react-three/drei";
+import { AutoFit } from "../components/AutoFit";
+import { CampusOrbitControls } from "../components/CampusOrbitControls";
 import { useNavigate, useParams } from "@/lib/router";
 import type { Agent } from "@paperclipai/shared";
-import { Vector3 } from "three";
+import { Vector3, NeutralToneMapping } from "three";
 import { Animal } from "../components/Animal";
+import { AgentScreen } from "../components/AgentScreen";
+import { FocalContainerPanel } from "../components/FocalContainerPanel";
 import { CampusEnvironment } from "../components/CampusEnvironment";
+import { DelegationTravellerLayer } from "../components/DelegationTravellerLayer";
+import { resolveRoomAgentPos } from "../layout/positionStore";
+import { useGridDrag } from "../lib/useGridDrag";
+import { useHoverEmissive } from "../lib/useHoverEmissive";
+import { useSmoothPosition } from "../lib/useSmoothPosition";
+import { useLabelColor } from "../lib/label-color";
+import type { Group } from "three";
+import { useRef } from "react";
 import { CampusOverlay } from "../components/CampusOverlay";
 import { CampusPostFx } from "../components/CampusPostFx";
 import { ContainerInspector } from "../components/ContainerInspector";
@@ -45,49 +57,69 @@ function ClickableAnimal({
   companyId,
   position,
   onClick,
+  onPointerDownTile,
+  dragging,
 }: {
   agent: Agent;
   companyId: string;
   position: [number, number, number];
   onClick: () => void;
+  onPointerDownTile?: (event: { clientX: number; clientY: number }) => void;
+  dragging?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
+  const ref = useRef<Group>(null);
+  useHoverEmissive(ref, hovered, { color: "#ffffff", intensity: 0.8 });
   const [x, y, z] = position;
-  const lift = hovered ? 0.2 : 0;
+  useSmoothPosition(ref, [x, y, z], dragging === true);
   const color = palette[pickAnimalPaletteKey(agent.id)];
+  const labelColor = useLabelColor();
 
-  // Zootropolis J2 — only probe aliaskit_vm leaves. Container / non-vm agents
-  // never show a red dot (they don't have a daemon to reach). The hook
-  // short-circuits when agentId is null, so we gate by adapterType here.
   const isLeaf = agent.adapterType === "aliaskit_vm";
   const { reachable } = useAgentReachability(companyId, isLeaf ? agent.id : null);
   const unreachable = isLeaf && reachable === false;
 
   return (
     <group
-      position={[x, y + lift, z]}
-      onPointerOver={(e) => {
+      ref={ref}
+      onPointerEnter={(e) => {
         e.stopPropagation();
         setHovered(true);
       }}
-      onPointerOut={() => setHovered(false)}
+      onPointerLeave={() => setHovered(false)}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onPointerDownTile?.({
+          clientX: (e.nativeEvent as PointerEvent).clientX,
+          clientY: (e.nativeEvent as PointerEvent).clientY,
+        });
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
     >
-      <Animal color={color} agentId={agent.id} unreachable={unreachable} />
+      <Animal
+        color={color}
+        agentId={agent.id}
+        role={agent.role ?? undefined}
+        unreachable={unreachable}
+      />
       <Text
         position={[0, -0.45, 1.2]}
         rotation={[-Math.PI / 6, 0, 0]}
         fontSize={0.18}
-        color={palette.ink}
+        color={labelColor}
         anchorX="center"
         anchorY="middle"
       >
         {agent.name}
       </Text>
+      {/* Phase W9 — floating status screen above each animal in the room. */}
+      <group position={[0, 3.6, 0]} userData={{ boundsIgnore: true }}>
+        <AgentScreen companyId={companyId} agentId={agent.id} />
+      </group>
     </group>
   );
 }
@@ -116,12 +148,24 @@ function RoomScene({
     : `/campus/${companyId}`;
   const backLabel = parent ? "floor" : "campus";
 
+  // Phase T4c — resolve each agent's free 2D pos (stored or line
+  // fallback) + grid-drag.
+  const total = children.length;
+  const resolvedAgents = children.map((agent, i) => {
+    const { x, z } = resolveRoomAgentPos(agent, i, total);
+    return { agent, x, z };
+  });
+  const agentDrag = useGridDrag({
+    companyId,
+    siblings: resolvedAgents,
+  });
+
   return (
     <>
       <CampusEnvironment />
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[5, 8, 3]} intensity={0.6} />
 
+      <Bounds fit clip margin={1.45}>
+        <AutoFit refitKey={children.length} />
       <ContainerView layer="room" name={roomName} status={liveStatus}>
         <RoomInterior childCount={children.length} roomId={id ?? "unknown"} />
         {loading ? (
@@ -131,29 +175,51 @@ function RoomScene({
         ) : children.length === 0 ? (
           <EmptyLayerOverlay layer="room" />
         ) : (
-          children.map((agent, i) => {
-            const pos = animalPosition(i, children.length);
+          resolvedAgents.map(({ agent, x, z }) => {
+            const isDragging = agentDrag.isDragging(agent.id);
+            const livePos: [number, number, number] =
+              isDragging && agentDrag.drag
+                ? [agentDrag.drag.currentX, 0, agentDrag.drag.currentZ]
+                : [x, 0, z];
             return (
               <ClickableAnimal
                 key={agent.id}
                 agent={agent}
                 companyId={companyId ?? ""}
-                position={pos}
-                onClick={() =>
-                  transitionTo(
-                    new Vector3(pos[0], pos[1] + 0.4, pos[2]),
-                    () => navigate(`/campus/${companyId}/agent/${agent.id}`),
-                  )
+                position={livePos}
+                dragging={isDragging}
+                onPointerDownTile={(e) =>
+                  agentDrag.beginGesture(agent, { x, z }, e)
                 }
+                onClick={() => {
+                  if (agentDrag.wasJustDragged()) return;
+                  transitionTo(
+                    new Vector3(livePos[0], livePos[1] + 0.4, livePos[2]),
+                    () => navigate(`/campus/${companyId}/agent/${agent.id}`),
+                  );
+                }}
               />
             );
           })
         )}
       </ContainerView>
+      </Bounds>
 
-      <OrbitControls
-        enabled={!isTransitioning}
-        enablePan={false}
+      {/* Phase S6: delegation travellers for room-owner → leaf animations. */}
+      {self && (
+        <DelegationTravellerLayer
+          agents={[
+            { id: self.id, position: [0, 0.8, 0] },
+            ...resolvedAgents.map(({ agent, x, z }) => ({
+              id: agent.id,
+              position: [x, 0, z] as [number, number, number],
+            })),
+          ]}
+        />
+      )}
+
+      <CampusOrbitControls
+        enabled={!isTransitioning && agentDrag.drag === null}
         minDistance={5}
         maxDistance={16}
         minPolarAngle={Math.PI / 6}
@@ -174,13 +240,30 @@ export function RoomView() {
   const { companyId, id } = useParams<{ companyId: string; id: string }>();
 
   return (
-    <div className="relative h-[calc(100vh-0px)] w-full">
-      <Canvas camera={{ position: ROOM_CAMERA, fov: 45 }} shadows={false} dpr={[1, 2]}>
-        <ZoomTransitionProvider>
-          <RoomScene companyId={companyId} id={id} />
-        </ZoomTransitionProvider>
-      </Canvas>
-      <CampusOverlay />
+    <div className="flex h-[calc(100vh-0px)] w-full flex-row">
+      <div className="relative flex-1 overflow-hidden">
+        <Canvas
+          camera={{ position: ROOM_CAMERA, fov: 45 }}
+          shadows="soft"
+          dpr={[1, 1.5]}
+          gl={{
+            antialias: false,
+            powerPreference: "high-performance",
+            toneMapping: NeutralToneMapping,
+            toneMappingExposure: 1.15,
+          }}
+        >
+          <Suspense fallback={null}>
+            <ZoomTransitionProvider>
+              <RoomScene companyId={companyId} id={id} />
+            </ZoomTransitionProvider>
+          </Suspense>
+        </Canvas>
+        <CampusOverlay />
+        {companyId && id && (
+          <FocalContainerPanel companyId={companyId} agentId={id} label="Room" />
+        )}
+      </div>
       {companyId && id && <ContainerInspector companyId={companyId} agentId={id} />}
     </div>
   );

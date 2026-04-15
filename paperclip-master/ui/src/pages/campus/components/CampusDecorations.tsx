@@ -3,6 +3,7 @@ import { Edges } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import type { Group } from "three";
 import { palette } from "../palette";
+import { axialToWorld, hexSpiralWorld, HEX_SIZE } from "../layout/hexGrid";
 import { LamppostModel, TreeModel } from "./models/NatureModels";
 
 /**
@@ -305,6 +306,29 @@ interface CampusDecorationsProps {
   layer: DecorationLayer;
   companyId?: string | null;
   parentId?: string | null;
+  /**
+   * Phase S2: for `layer === "campus"`, the island footprint is a hex
+   * spiral rather than a rectangular grass plane. Callers pass the
+   * number of occupied tiles (child count); decor is scattered ONLY on
+   * unoccupied tiles so trees don't float in the water.
+   */
+  occupiedTileCount?: number;
+  /**
+   * Phase S2: total tiles on the hex island. Defaults to 7 (matches
+   * HexIsland `minTiles`). Decor can be placed on tiles
+   * `[occupiedTileCount, totalTileCount)`.
+   */
+  totalTileCount?: number;
+  /**
+   * Phase T5: explicit list of VISIBLE island axials — when the
+   * frontier-expansion layout is active, the island's tiles are no
+   * longer a simple spiral of `totalTileCount`. Passing this overrides
+   * the spiral assumption so decor only lands on tiles that actually
+   * exist (no more trees floating in the sea).
+   */
+  islandAxials?: Array<[number, number]>;
+  /** Subset of `islandAxials` occupied by children (skipped for decor). */
+  occupiedAxialKeys?: Set<string>;
 }
 
 /**
@@ -316,6 +340,10 @@ export function CampusDecorations({
   layer,
   companyId,
   parentId,
+  occupiedTileCount = 0,
+  totalTileCount = 7,
+  islandAxials,
+  occupiedAxialKeys,
 }: CampusDecorationsProps) {
   const seedBase = useMemo(
     () => hashSeed(`${layer}:${companyId ?? ""}:${parentId ?? ""}`),
@@ -324,27 +352,40 @@ export function CampusDecorations({
 
   const decor = useMemo(() => {
     if (layer === "campus") {
-      // Ground plane extends ~±12 in xz; scatter outside a small center gap
-      // so buildings don't collide with trees.
-      const trees = scatter(seedBase ^ 0x7e5, 6, {
-        xMin: -11,
-        xMax: 11,
-        zMin: -11,
-        zMax: 11,
-      }, { minRadius: 7, y: 0, scaleJitter: 0.25 });
-      const clouds = scatter(seedBase ^ 0xc10d, 2, {
-        xMin: -8,
-        xMax: 8,
-        zMin: -6,
-        zMax: 6,
-      }, { y: 8, scaleJitter: 0.3 });
-      const lampposts = scatter(seedBase ^ 0x1a3b, 2, {
-        xMin: -10,
-        xMax: 10,
-        zMin: -10,
-        zMax: 10,
-      }, { minRadius: 8, y: 0, scaleJitter: 0.1 });
-      return { trees, clouds, lampposts, benches: [], chimneys: [] };
+      // Phase T5: prefer caller-supplied explicit axials (frontier mode).
+      // Fallback to the old spiral assumption for legacy callers.
+      let freeTiles: Array<[number, number]>;
+      if (islandAxials) {
+        freeTiles = islandAxials
+          .filter(([q, r]) => !(occupiedAxialKeys?.has(`${q},${r}`) ?? false))
+          .map(([q, r]) => axialToWorld(q, r, HEX_SIZE));
+      } else {
+        const allTiles = hexSpiralWorld(Math.max(totalTileCount, occupiedTileCount));
+        freeTiles = allTiles.slice(occupiedTileCount);
+      }
+      const rng = mulberry32(seedBase ^ 0xde7a);
+      const trees: Placement[] = [];
+      const lampposts: Placement[] = [];
+      for (let i = 0; i < freeTiles.length; i++) {
+        const [x, z] = freeTiles[i];
+        const roll = rng();
+        // Tiny offset on the tile top so decor isn't glued to the centre.
+        const ox = (rng() - 0.5) * 0.6;
+        const oz = (rng() - 0.5) * 0.6;
+        const placement: Placement = {
+          position: [x + ox, 0, z + oz],
+          rotationY: rng() * Math.PI * 2,
+          scale: 0.85 + rng() * 0.25,
+          phase: rng() * Math.PI * 2,
+        };
+        if (roll < 0.55) trees.push(placement);
+        else if (roll < 0.75) lampposts.push(placement);
+        // else: leave the tile bare for visual breathing room.
+      }
+      // Clouds removed — they pushed the AutoFit bounding box up and
+      // forced the camera too far back; the sky already has the
+      // sunset HDRI and they didn't add much visually.
+      return { trees, clouds: [], lampposts, benches: [], chimneys: [] };
     }
     if (layer === "floor") {
       // Floor slab is ~4.4x4.4 in BuildingView but FloorView uses a wider
@@ -363,17 +404,11 @@ export function CampusDecorations({
       }, { minRadius: 2.4, y: 0, scaleJitter: 0.15 });
       return { trees: [], clouds: [], lampposts, benches, chimneys: [] };
     }
-    // building: rooftop chimneys. BuildingView stacks floor slabs starting
-    // at y=0.5 with a 2-unit step; there's no single "rooftop" height.
-    // Anchor chimneys high above so they read as rooftop accents without
-    // clipping into slabs.
-    const chimneys = scatter(seedBase ^ 0xc41a, 2, {
-      xMin: -1.5,
-      xMax: 1.5,
-      zMin: -1.5,
-      zMax: 1.5,
-    }, { y: 6.5, scaleJitter: 0.2 });
-    return { trees: [], clouds: [], lampposts: [], benches: [], chimneys };
+    // Phase S polish: chimney decorations disabled for the building
+    // layer — they were anchored at a hardcoded y=6.5 which floated
+    // them mid-air above the building silhouette. Needs per-building
+    // rooftop anchors to do properly; skipping for now.
+    return { trees: [], clouds: [], lampposts: [], benches: [], chimneys: [] };
   }, [layer, seedBase]);
 
   return (

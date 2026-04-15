@@ -23,7 +23,7 @@ import {
   projects,
 } from "@paperclipai/db";
 import type { IssueRelationIssueSummary } from "@paperclipai/shared";
-import { extractAgentMentionIds, extractProjectMentionIds, isUuidLike } from "@paperclipai/shared";
+import { extractAgentMentionIds, extractProjectMentionIds, isUuidLike, readZootropolisLayer } from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 import {
   defaultIssueExecutionWorkspaceSettingsForProject,
@@ -131,6 +131,17 @@ type IssueCreateInput = Omit<typeof issues.$inferInsert, "companyId"> & {
   labelIds?: string[];
   blockedByIssueIds?: string[];
   inheritExecutionWorkspaceFromIssueId?: string | null;
+  /**
+   * Zootropolis Phase R: the request actor (agent) that is asking for this
+   * delegation to happen. Distinct from `createdByAgentId`, which Phase R
+   * pins to the assignee (so the author-of-record always matches the
+   * owner). The delegator is used solely to enforce the
+   * parent↔child rule at creation time.
+   *
+   * Null for human-initiated creates (no strict check; a human can seed a
+   * root-level issue on any container).
+   */
+  delegatorAgentId?: string | null;
 };
 type IssueRelationSummaryMap = {
   blockedBy: IssueRelationIssueSummary[];
@@ -149,28 +160,64 @@ function escapeLikePattern(value: string): string {
 }
 
 /**
- * Zootropolis delegation rule: an issue may only exist between an agent and
- * its direct parent or child in the reports-to tree. Strictly parent↔child;
- * no skip-layer, no peer messaging, no cross-subtree shortcuts.
+ * Zootropolis delegation rule (Phase S): an issue may only be assigned by an
+ * agent to a *direct report* AND that report must be in the layer immediately
+ * below the delegator's. Both checks must pass — reportsTo alone is not
+ * enough, because a misconfigured org chart could otherwise let a floor
+ * assign straight to a leaf. Layers ladder is agent→room→floor→building→campus.
  *
  * Pure check used by the create path. Returns { allowed: true } or
  * { allowed: false, reason } so callers can format errors how they like.
  */
+const LAYER_LADDER = ["agent", "room", "floor", "building", "campus"] as const;
+type Layer = (typeof LAYER_LADDER)[number];
+
+function expectedChildLayer(parentLayer: Layer | null | undefined): Layer | null {
+  if (!parentLayer) return null;
+  const idx = LAYER_LADDER.indexOf(parentLayer);
+  if (idx <= 0) return null; // 'agent' is a leaf; has no valid child layer
+  return LAYER_LADDER[idx - 1] ?? null;
+}
+
 export function checkDirectReportDelegation(input: {
-  creatorAgentId: string;
-  assigneeAgent: { id: string; reportsTo: string | null };
+  delegatorAgentId: string;
+  delegatorLayer?: Layer | null;
+  assigneeAgent: { id: string; reportsTo: string | null; layer?: Layer | null };
 }): { allowed: true } | { allowed: false; reason: string } {
-  const { creatorAgentId, assigneeAgent } = input;
-  if (assigneeAgent.id === creatorAgentId) {
+  const { delegatorAgentId, delegatorLayer, assigneeAgent } = input;
+  if (assigneeAgent.id === delegatorAgentId) {
     return { allowed: false, reason: "Cannot assign an issue to yourself" };
   }
-  if (assigneeAgent.reportsTo !== creatorAgentId) {
+  if (assigneeAgent.reportsTo !== delegatorAgentId) {
     return {
       allowed: false,
       reason:
         "Zootropolis delegation rule: issues may only be assigned to a direct report. " +
         "Escalate up to your manager or delegate to one of your own reports.",
     };
+  }
+  // Layer-adjacency: when both layers are known, the assignee's layer must be
+  // exactly one rung below the delegator's. Skip the check only if either
+  // layer is unknown (legacy non-Zootropolis agents).
+  if (delegatorLayer && assigneeAgent.layer) {
+    const expected = expectedChildLayer(delegatorLayer);
+    if (!expected) {
+      return {
+        allowed: false,
+        reason:
+          `Zootropolis layer rule: ${delegatorLayer} agents are leaves and cannot delegate. ` +
+          "Only container layers (room/floor/building/campus) may create sub-issues.",
+      };
+    }
+    if (assigneeAgent.layer !== expected) {
+      return {
+        allowed: false,
+        reason:
+          `Zootropolis layer rule: a ${delegatorLayer} agent may only delegate to the ${expected} layer ` +
+          `(exactly one rung below). Assignee is layer "${assigneeAgent.layer}" — skip-layer or sideways ` +
+          "delegation is refused. Insert the missing intermediate layer in the org chart.",
+      };
+    }
   }
   return { allowed: true };
 }
@@ -640,26 +687,39 @@ export function issueService(db: Db) {
   // it off during debugging without redeploying.
   async function assertZootropolisDelegation(
     companyId: string,
-    creatorAgentId: string,
+    delegatorAgentId: string,
     assigneeAgentId: string,
   ) {
     if (!isZootropolisDelegationStrict()) return;
-    const assignee = await db
-      .select({
-        id: agents.id,
-        companyId: agents.companyId,
-        reportsTo: agents.reportsTo,
-      })
-      .from(agents)
-      .where(eq(agents.id, assigneeAgentId))
-      .then((rows) => rows[0] ?? null);
+    const [assignee, delegator] = await Promise.all([
+      db
+        .select({
+          id: agents.id,
+          companyId: agents.companyId,
+          reportsTo: agents.reportsTo,
+          metadata: agents.metadata,
+        })
+        .from(agents)
+        .where(eq(agents.id, assigneeAgentId))
+        .then((rows) => rows[0] ?? null),
+      db
+        .select({ id: agents.id, metadata: agents.metadata })
+        .from(agents)
+        .where(eq(agents.id, delegatorAgentId))
+        .then((rows) => rows[0] ?? null),
+    ]);
     if (!assignee) throw notFound("Assignee agent not found");
     if (assignee.companyId !== companyId) {
       throw unprocessable("Assignee must belong to same company");
     }
     const result = checkDirectReportDelegation({
-      creatorAgentId,
-      assigneeAgent: { id: assignee.id, reportsTo: assignee.reportsTo ?? null },
+      delegatorAgentId,
+      delegatorLayer: (readZootropolisLayer(delegator?.metadata) ?? null) as Layer | null,
+      assigneeAgent: {
+        id: assignee.id,
+        reportsTo: assignee.reportsTo ?? null,
+        layer: (readZootropolisLayer(assignee.metadata) ?? null) as Layer | null,
+      },
     });
     if (!result.allowed) {
       throw conflict(result.reason);
@@ -1483,6 +1543,7 @@ export function issueService(db: Db) {
         labelIds: inputLabelIds,
         blockedByIssueIds,
         inheritExecutionWorkspaceFromIssueId,
+        delegatorAgentId: inputDelegatorAgentId,
         ...issueData
       } = data;
       const isolatedWorkspacesEnabled = (await instanceSettings.getExperimental()).enableIsolatedWorkspaces;
@@ -1500,13 +1561,34 @@ export function issueService(db: Db) {
       if (data.assigneeUserId) {
         await assertAssignableUser(companyId, data.assigneeUserId);
       }
-      if (data.createdByAgentId && data.assigneeAgentId) {
+      // Phase V: backlog is dead. Belt-and-braces guard for any code path
+      // that bypassed the createIssueSchema validator (direct service calls
+      // from the heartbeat runner, internal seed scripts, etc.). Coerce
+      // missing status to `todo`; reject explicit `backlog`.
+      if (issueData.status === "backlog") {
+        throw unprocessable(
+          "Issue status \"backlog\" is no longer accepted. New issues are born `todo` and may transition to in_progress / in_review / done / blocked / cancelled.",
+        );
+      }
+      if (!issueData.status) {
+        issueData.status = "todo";
+      }
+      // Zootropolis Phase R2: the delegation rule now uses the request actor
+      // (the agent that's *asking* for this issue to exist), not the stored
+      // createdByAgentId. Human-initiated creates pass delegatorAgentId=null
+      // and skip the strict check — a human can seed any container issue.
+      if (inputDelegatorAgentId && data.assigneeAgentId) {
         await assertZootropolisDelegation(
           companyId,
-          data.createdByAgentId,
+          inputDelegatorAgentId,
           data.assigneeAgentId,
         );
       }
+      // Phase S: the Phase R createdBy override is gone. createdByAgentId
+      // now reflects the actual delegator (whoever the caller passed), so
+      // the layer-adjacency check has truthful provenance to work with. The
+      // "only the assignee may close" gate now uses assigneeAgentId directly
+      // (see heartbeat.ts) rather than the conflated createdBy field.
       if (data.status === "in_progress" && !data.assigneeAgentId && !data.assigneeUserId) {
         throw unprocessable("in_progress issues require an assignee");
       }
@@ -1693,6 +1775,13 @@ export function issueService(db: Db) {
       }
 
       if (issueData.status) {
+        // Phase V: backlog is dead. Reject any update that tries to push an
+        // issue back into backlog, regardless of caller.
+        if (issueData.status === "backlog") {
+          throw unprocessable(
+            "Issue status \"backlog\" is no longer accepted. Issues cannot be moved back to backlog — use blocked or cancelled if work is paused.",
+          );
+        }
         assertTransition(existing.status, issueData.status);
       }
 

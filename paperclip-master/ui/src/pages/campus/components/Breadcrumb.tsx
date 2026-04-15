@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import {
   readZootropolisLayer,
   type Agent,
@@ -8,7 +9,6 @@ import {
 } from "@paperclipai/shared";
 import { agentsApi } from "../../../api/agents";
 import { queryKeys } from "../../../lib/queryKeys";
-import { palette } from "../palette";
 
 interface Crumb {
   label: string;
@@ -25,13 +25,11 @@ function inferLayerFromPath(pathname: string): ZootropolisLayer | null {
 }
 
 /**
- * Breadcrumb — HTML overlay, mounted as a sibling of the 3D <Canvas>.
- * Reads route params, walks up `reportsTo` using the cached agents list,
- * and renders clickable crumbs: Campus › Building › Floor › Room › Agent.
+ * Breadcrumb — HTML overlay above the 3D <Canvas>. Walks reportsTo to render
+ * Campus › Building › Floor › Room › Agent.
  *
- * Intentionally forgiving: if the agent list is still loading or the
- * current id is missing we render whatever prefix we already know so the
- * user is never staring at an empty bar.
+ * Phase U: restyled to use the same dark glass treatment as the rest of the
+ * campus chrome (bg-card/95 + border-border + Lucide chevron separators).
  */
 export function Breadcrumb() {
   const navigate = useNavigate();
@@ -55,7 +53,6 @@ export function Breadcrumb() {
     ];
     if (!id) return roots;
 
-    // Walk up reportsTo to build the chain root → leaf.
     const chain: Agent[] = [];
     let cursor: Agent | undefined = byId.get(id);
     const seen = new Set<string>();
@@ -65,7 +62,6 @@ export function Breadcrumb() {
       cursor = cursor.reportsTo ? byId.get(cursor.reportsTo) : undefined;
     }
 
-    // Fallback when we know the id but data hasn't loaded yet.
     if (chain.length === 0) {
       const layerFromPath = inferLayerFromPath(location.pathname);
       if (layerFromPath && companyId) {
@@ -80,8 +76,6 @@ export function Breadcrumb() {
 
     for (const agent of chain) {
       const layer = readZootropolisLayer(agent.metadata);
-      // Skip campus-layer agents — the root "Campus" crumb already covers
-      // them (the campus route is /campus/:companyId, not /campus/:companyId/campus/:id).
       if (layer === "campus") continue;
       const routeLayer: ZootropolisLayer = layer ?? "agent";
       roots.push({
@@ -101,28 +95,25 @@ export function Breadcrumb() {
       aria-label="Campus breadcrumb"
       className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2"
     >
-      <ol
-        className="pointer-events-auto flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium shadow-sm backdrop-blur-md"
-        style={{
-          backgroundColor: `${palette.bone}d9`,
-          borderColor: palette.ink,
-          color: palette.ink,
-        }}
-      >
+      <ol className="pointer-events-auto flex items-center gap-0.5 rounded-full border border-border bg-card/95 px-3 py-1.5 text-sm font-medium text-foreground shadow-sm backdrop-blur-md">
         {crumbs.map((crumb, i) => {
           const isLast = i === crumbs.length - 1;
           return (
-            <li key={`${crumb.layer}-${crumb.href}-${i}`} className="flex items-center gap-1">
+            <li
+              key={`${crumb.layer}-${crumb.href}-${i}`}
+              className="flex items-center gap-0.5"
+            >
               {i > 0 && (
-                <span aria-hidden style={{ color: palette.dustBlue }}>
-                  ›
-                </span>
+                <ChevronRight
+                  size={12}
+                  aria-hidden
+                  className="text-muted-foreground/60"
+                />
               )}
               {isLast ? (
                 <span
                   aria-current="page"
-                  className="cursor-default px-1"
-                  style={{ color: palette.clay }}
+                  className="cursor-default px-1.5 text-foreground"
                 >
                   {crumb.label}
                 </span>
@@ -130,8 +121,7 @@ export function Breadcrumb() {
                 <button
                   type="button"
                   onClick={() => navigate(crumb.href)}
-                  className="cursor-pointer rounded px-1 hover:underline"
-                  style={{ color: palette.deepBlue }}
+                  className="cursor-pointer rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
                 >
                   {crumb.label}
                 </button>

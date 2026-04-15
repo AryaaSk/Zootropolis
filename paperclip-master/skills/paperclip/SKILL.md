@@ -13,6 +13,16 @@ description: >
 
 You run in **heartbeats** — short execution windows triggered by Paperclip. Each heartbeat, you wake up, check your work, do something useful, and exit. You do not run continuously.
 
+> **Zootropolis container agents** (those with `metadata.zootropolis.layer ∈ {room, floor, building, campus}`) carry a per-agent `AGENTS.md` (loaded into your system prompt at startup) that overrides the `Step 7 — Do the work` instruction below with a strict decompose+delegate contract — including a mandatory "ZOOTROPOLIS DECISION" block you must print before any other tool call. The container `AGENTS.md` is the source of truth for those agents; if you are a container agent, defer to it. If you are a leaf agent (`layer = "agent"` or absent), the rest of this skill applies as written.
+
+---
+
+<!-- ZOOTROPOLIS_OVERRIDE_REMOVED — moved to per-agent AGENTS.md so it
+ships in the agent's system prompt rather than here. The template lives
+at server/src/onboarding-assets/zootropolis-container/AGENTS.md and is
+materialised at hire-time by routes/agents.ts (Phase Y). To refresh
+existing agents, POST /api/companies/{id}/zootropolis/refresh-container-instructions. -->
+
 ## Authentication
 
 Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP_API_URL`, `PAPERCLIP_RUN_ID`. Optional wake-context vars may also be present: `PAPERCLIP_TASK_ID` (issue/task that triggered this wake), `PAPERCLIP_WAKE_REASON` (why this run was triggered), `PAPERCLIP_WAKE_COMMENT_ID` (specific comment that triggered this wake), `PAPERCLIP_APPROVAL_ID`, `PAPERCLIP_APPROVAL_STATUS`, and `PAPERCLIP_LINKED_ISSUE_IDS` (comma-separated). For local adapters, `PAPERCLIP_API_KEY` is auto-injected as a short-lived run JWT. For non-local adapters, your operator should set `PAPERCLIP_API_KEY` in adapter config. All requests use `Authorization: Bearer $PAPERCLIP_API_KEY`. All endpoints under `/api`, all JSON. Never hard-code the API URL.
@@ -104,6 +114,8 @@ Paperclip converts that into a changes-requested decision, reassigns the issue t
 If `currentParticipant` does **not** match you, do not try to advance the stage. Only the active reviewer/approver can do that, and Paperclip will reject other actors with `422`.
 
 **Step 7 — Do the work.** Use your tools and capabilities.
+
+> **Read the issue's `description` BEFORE acting, not just its `title`.** The wake payload now includes both, but agents have repeatedly skimmed the title and produced output that ignored requirements buried in the description (e.g. wrote a generic poem when the description said "about aliaskit.com, do some research"). Before you start: confirm in your own words what the description is asking. If it asks for research / a specific topic / a specific format / a specific destination — do exactly that, not a generic version of the title.
 
 **Step 8 — Update status and communicate.** Always include the run ID header.
 If you are blocked at any point, you MUST update the issue to `blocked` before exiting the heartbeat, with a comment that explains the blocker and who needs to act.

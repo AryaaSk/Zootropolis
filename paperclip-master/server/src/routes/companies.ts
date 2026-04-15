@@ -292,6 +292,41 @@ export function companyRoutes(db: Db, storage?: StorageService) {
         req.actor.userId ?? "board",
       );
     }
+
+    // Zootropolis: every company has an implicit "campus" agent — the
+    // root of the spatial hierarchy, named after the company. Users
+    // never create it; it's the persistent canvas on which all other
+    // agents live. See packages/shared/src/zootropolis.ts
+    // (ZOOTROPOLIS_WRAPPABLE_LAYERS) — `campus` is deliberately NOT
+    // wrappable/hirable by the user.
+    try {
+      await agents.create(company.id, {
+        name: company.name,
+        role: "general",
+        title: null,
+        reportsTo: null,
+        adapterType: "claude_local",
+        adapterConfig: {},
+        runtimeConfig: {},
+        budgetMonthlyCents: 0,
+        metadata: { zootropolis: { layer: "campus" } },
+      } as never);
+    } catch (err) {
+      // Non-fatal: the company is usable without a campus agent;
+      // CampusView has legacy fall-through logic for that case. Log
+      // and continue so a mis-configured environment doesn't block
+      // company creation.
+      logActivity(db, {
+        companyId: company.id,
+        actorType: "system",
+        actorId: "zootropolis",
+        action: "zootropolis.campus_seed_failed",
+        entityType: "company",
+        entityId: company.id,
+        details: { error: err instanceof Error ? err.message : String(err) },
+      }).catch(() => {});
+    }
+
     res.status(201).json(company);
   });
 

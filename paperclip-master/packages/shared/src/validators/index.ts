@@ -128,6 +128,7 @@ export {
 } from "./project.js";
 
 export {
+  SETTABLE_ISSUE_STATUSES,
   createIssueSchema,
   createIssueLabelSchema,
   updateIssueSchema,

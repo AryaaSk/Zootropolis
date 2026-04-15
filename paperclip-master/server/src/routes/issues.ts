@@ -36,6 +36,7 @@ import {
   feedbackService,
   goalService,
   heartbeatService,
+  ZOOTROPOLIS_PREAMBLE,
   instanceSettingsService,
   issueApprovalService,
   issueService,
@@ -718,7 +719,13 @@ export function issueRoutes(
       svc.listAttachments(issue.id),
     ]);
 
+    // Phase S2: ship the Zootropolis preamble inside heartbeat-context too,
+    // not only in the stdin wake payload. Agents that follow the Paperclip
+    // skill flow call this endpoint for context — and previously they
+    // never saw the delegation rules at all, because the preamble lived
+    // only in stdin which they did not read.
     res.json({
+      zootropolis: ZOOTROPOLIS_PREAMBLE,
       issue: {
         id: issue.id,
         identifier: issue.identifier,
@@ -1277,8 +1284,16 @@ export function issueRoutes(
     const issue = await svc.create(companyId, {
       ...req.body,
       executionPolicy,
+      // Zootropolis Phase R1: svc.create overrides createdByAgentId to the
+      // assignee regardless of what we pass here, enforcing
+      // createdBy === assignee. We still set createdByUserId from the human
+      // actor so user-initiated creates stay attributable in activity log.
       createdByAgentId: actor.agentId,
       createdByUserId: actor.actorType === "user" ? actor.actorId : null,
+      // Phase R2: delegator is the request actor (agent); null for humans.
+      // svc.create uses this — not createdByAgentId — for the strict
+      // direct-report check.
+      delegatorAgentId: actor.agentId ?? null,
     });
 
     await logActivity(db, {

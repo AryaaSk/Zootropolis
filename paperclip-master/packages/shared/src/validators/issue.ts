@@ -113,6 +113,27 @@ export const issueExecutionStateSchema = z.object({
   lastDecisionOutcome: z.enum(ISSUE_EXECUTION_DECISION_OUTCOMES).nullable(),
 });
 
+/**
+ * Phase V: `backlog` is no longer a settable status. New issues are born
+ * `todo` and only ever transition between todo / in_progress / in_review /
+ * done / blocked / cancelled. `backlog` remains in {@link ISSUE_STATUSES}
+ * for backwards-compatibility with legacy rows but the API rejects any
+ * attempt to create or update an issue with `status: "backlog"`.
+ *
+ * Rationale: in Zootropolis, issues are messages between agents — there is
+ * no "triage" state. An issue assigned to an agent must be picked up. The
+ * old default silently dead-ended issues since the heartbeat picker and the
+ * wake-bus both skip backlog rows.
+ */
+export const SETTABLE_ISSUE_STATUSES = [
+  "todo",
+  "in_progress",
+  "in_review",
+  "done",
+  "blocked",
+  "cancelled",
+] as const;
+
 export const createIssueSchema = z.object({
   projectId: z.string().uuid().optional().nullable(),
   projectWorkspaceId: z.string().uuid().optional().nullable(),
@@ -122,7 +143,7 @@ export const createIssueSchema = z.object({
   inheritExecutionWorkspaceFromIssueId: z.string().uuid().optional().nullable(),
   title: z.string().min(1),
   description: z.string().optional().nullable(),
-  status: z.enum(ISSUE_STATUSES).optional().default("backlog"),
+  status: z.enum(SETTABLE_ISSUE_STATUSES).optional().default("todo"),
   priority: z.enum(ISSUE_PRIORITIES).optional().default("medium"),
   assigneeAgentId: z.string().uuid().optional().nullable(),
   assigneeUserId: z.string().optional().nullable(),

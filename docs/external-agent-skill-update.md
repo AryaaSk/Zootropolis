@@ -22,6 +22,30 @@ them to match, paste the replacement below.
 - Bad-pattern examples: empty artifact, marker-mid-stdout, multiple markers.
 - Identity is via env vars (v1.2+), not `identity.json`.
 
+### v1.4 / Phase R — container manager rule (container agents only)
+
+External daemons only host leaf agents, so the skill itself is unchanged.
+But if you have your own container-side prompt or orchestrator, note the
+new server-side rules:
+
+- **Invariant**: every issue has `createdByAgentId === assigneeAgentId`.
+  The server pins this on create — don't send a different
+  `createdByAgentId`, it will be overridden. "Who asked for this" is now
+  tracked via the authenticated request actor and the `parentId` chain,
+  not the stored creator field.
+- **Close permission**: only the assignee (== creator) may close an
+  issue. Cross-agent closes are rejected with a violation comment.
+- **Container synthesis gate**: a container agent (layer
+  room/floor/building/campus) cannot close its issue unless (a) it has
+  at least one sub-issue AND (b) all sub-issues are in `done` or
+  `cancelled`. Writing code/artifacts yourself and closing is
+  hard-rejected server-side — containers must delegate to leaves and
+  synthesise their artifacts.
+
+Leaves keep their existing behaviour: do the work, emit a close marker
+with a non-empty `artifact` as the last line of stdout. No change required
+on the external-daemon side.
+
 ## How to apply
 
 1. Open `~/Desktop/zootropolis-agent-1/daemon.mjs`.

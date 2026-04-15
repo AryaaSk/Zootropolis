@@ -460,6 +460,7 @@ export {
   createIssueSchema,
   createIssueLabelSchema,
   updateIssueSchema,
+  SETTABLE_ISSUE_STATUSES,
   issueExecutionPolicySchema,
   issueExecutionStateSchema,
   issueExecutionWorkspaceSettingsSchema,
@@ -638,13 +639,18 @@ export {
 export { API_PREFIX, API } from "./api.js";
 export {
   ZOOTROPOLIS_LAYERS,
+  ZOOTROPOLIS_WRAPPABLE_LAYERS,
   isZootropolisLayer,
+  isZootropolisWrappableLayer,
   readZootropolisLayer,
+  readZootropolisPos,
   readZootropolisCloseMarker,
   type ZootropolisLayer,
+  type ZootropolisWrappableLayer,
   type ZootropolisRuntime,
   type ZootropolisAliasHandles,
   type ZootropolisAgentMetadata,
+  type ZootropolisPos,
   type ZootropolisCloseMarker,
   type ZootropolisResultEnvelope,
 } from "./zootropolis.js";

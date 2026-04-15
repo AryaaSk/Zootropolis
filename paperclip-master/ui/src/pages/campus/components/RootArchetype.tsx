@@ -1,12 +1,16 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Edges, Text, useCursor } from "@react-three/drei";
+import type { Group } from "three";
 import type { Agent } from "@paperclipai/shared";
 import { readZootropolisLayer } from "@paperclipai/shared";
-import { BuildingWindows } from "./BuildingWindows";
 import { BuildingModel } from "./models/BuildingModel";
 import { Animal } from "./Animal";
+import { AgentScreen } from "./AgentScreen";
+import { pickAnimalPaletteKey, useContainerChildren } from "../hooks/useContainerChildren";
 import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
-import { pickAnimalPaletteKey } from "../hooks/useContainerChildren";
+import { useHoverEmissive } from "../lib/useHoverEmissive";
+import { useLabelColor } from "../lib/label-color";
+import { useSmoothPosition } from "../lib/useSmoothPosition";
 import { palette } from "../palette";
 
 type Pos = [number, number, number];
@@ -16,26 +20,28 @@ interface RootArchetypeProps {
   position: Pos;
   companyId: string | undefined;
   onClick: () => void;
+  /**
+   * Phase T2 — called when the pointer is pressed on this tile. The
+   * parent uses this to begin a drag gesture; tiles don't own the drag
+   * state. `clientX/Y` is the browser pointer position so the gesture
+   * hook can threshold movement.
+   */
+  onPointerDownTile?: (event: { clientX: number; clientY: number }) => void;
+  /**
+   * Phase T5a — when true, the tile snaps hard to `position` each
+   * frame (pinned to cursor during active drag). When false, the tile
+   * smoothly damps toward it so swap-on-drop reads as animation.
+   */
+  dragging?: boolean;
 }
 
 /**
  * Phase N1 — per-layer child dispatcher for the campus root.
  *
- * When there are multiple agents at the campus root (i.e., agents with
- * reportsTo=null), they may sit at any layer: a lone leaf, a standalone
- * room, a single floor, etc. Prior to N1 the CampusView rendered EVERY
- * root as a building, which made a single leaf appear as a ghost tower.
- *
- * This component reads each child's `metadata.zootropolis.layer` and
- * renders it with the matching archetype:
- *   - agent   → Animal (little low-poly creature)
- *   - room    → miniature walled-room shell icon
- *   - floor   → miniature slab icon
- *   - building → full BuildingModel + BuildingWindows (current behaviour)
- *   - campus  → stack of 2 small building silhouettes (rare case)
- *
- * Click routes into the appropriate layer view; the parent CampusScene
- * wraps this with its camera transition so navigation is animated.
+ * Hover feedback (Phase S polish v3) is an emissive-color boost on the
+ * whole object's materials, applied via useHoverEmissive(). No geometry
+ * moves, and the entire mesh visibly glows the hover color (default:
+ * warm white) so clickability is unambiguous.
  */
 export function RootArchetype(props: RootArchetypeProps) {
   const layer = readZootropolisLayer(props.agent.metadata) ?? "agent";
@@ -47,84 +53,100 @@ export function RootArchetype(props: RootArchetypeProps) {
     case "floor":
       return <FloorTile {...props} />;
     case "campus":
-      return <CampusTile {...props} />;
     case "building":
     default:
+      // Campus-tagged agents are never child tiles: the campus agent is
+      // the IMPLICIT root (CampusScene unfolds it and renders its
+      // children). If one somehow appears here it's legacy data —
+      // render as a building so the user isn't stuck.
       return <BuildingTile {...props} />;
   }
 }
 
-/** Agent at the campus root = an orphan leaf. Render as a walking animal
- *  on the grass, with a small label underneath. No building, no room. */
-function AgentTile({ agent, position, onClick }: RootArchetypeProps) {
+function AgentTile({ agent, position, companyId, onClick, onPointerDownTile, dragging }: RootArchetypeProps) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
+  const ref = useRef<Group>(null);
+  useHoverEmissive(ref, hovered, { color: "#ffffff", intensity: 0.8 });
   const color = palette[pickAnimalPaletteKey(agent.id)];
   const [x, y, z] = position;
+  useSmoothPosition(ref, [x, y, z], dragging === true);
+  const labelColor = useLabelColor();
   return (
     <group
-      position={[x, y, z]}
-      onPointerOver={(e) => {
+      ref={ref}
+
+      onPointerEnter={(e) => {
         e.stopPropagation();
         setHovered(true);
       }}
-      onPointerOut={() => setHovered(false)}
+      onPointerLeave={() => setHovered(false)}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onPointerDownTile?.({ clientX: (e.nativeEvent as PointerEvent).clientX, clientY: (e.nativeEvent as PointerEvent).clientY });
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
     >
-      <Animal
-        color={color}
-        agentId={agent.id}
-        role={agent.role ?? undefined}
-      />
+      <Animal color={color} agentId={agent.id} role={agent.role ?? undefined} />
       <Text
         position={[0, -0.9, 1.2]}
         rotation={[-Math.PI / 6, 0, 0]}
         fontSize={0.28}
-        color={palette.ink}
+        color={labelColor}
         anchorX="center"
         anchorY="middle"
       >
         {agent.name}
       </Text>
+      {/* Phase W9 — floating status screen above the animal head.
+          Animal head ≈ 1.95 world units; screen at y=4 floats well
+          clear so camera angles rarely overlap it with the body. */}
+      {companyId && (
+        <group position={[0, 4, 0]} userData={{ boundsIgnore: true }}>
+          <AgentScreen companyId={companyId} agentId={agent.id} />
+        </group>
+      )}
     </group>
   );
 }
 
-/** Room at the campus root = an orphan room with its own leaves. Render
- *  as a miniature room shell (4 walls + floor) small enough to fit the
- *  grid buildingPosition() uses. */
-function RoomTile({ agent, position, onClick }: RootArchetypeProps) {
+function RoomTile({ agent, position, companyId, onClick, onPointerDownTile, dragging }: RootArchetypeProps) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
+  const ref = useRef<Group>(null);
+  useHoverEmissive(ref, hovered);
   const [x, y, z] = position;
-  const lift = hovered ? 0.15 : 0;
-  // Small room footprint: 2.4 wide, 0.4 tall walls.
+  useSmoothPosition(ref, [x, y, z], dragging === true);
+  const labelColor = useLabelColor();
   const W = 2.4;
   const WALL_H = 0.4;
   const FLOOR_THICKNESS = 0.08;
   return (
     <group
-      position={[x, y + lift, z]}
-      onPointerOver={(e) => {
+      ref={ref}
+
+      onPointerEnter={(e) => {
         e.stopPropagation();
         setHovered(true);
       }}
-      onPointerOut={() => setHovered(false)}
+      onPointerLeave={() => setHovered(false)}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onPointerDownTile?.({ clientX: (e.nativeEvent as PointerEvent).clientX, clientY: (e.nativeEvent as PointerEvent).clientY });
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
     >
-      {/* Floor slab */}
       <mesh position={[0, FLOOR_THICKNESS / 2, 0]}>
         <boxGeometry args={[W, FLOOR_THICKNESS, W]} />
-        <meshLambertMaterial color={palette.ground} />
+        <meshStandardMaterial color={palette.ground} />
         <Edges color={palette.ink} />
       </mesh>
-      {/* Four low walls */}
       {[
         [0, WALL_H / 2 + FLOOR_THICKNESS, W / 2, W, WALL_H, 0.1],
         [0, WALL_H / 2 + FLOOR_THICKNESS, -W / 2, W, WALL_H, 0.1],
@@ -133,7 +155,7 @@ function RoomTile({ agent, position, onClick }: RootArchetypeProps) {
       ].map(([px, py, pz, sx, sy, sz], i) => (
         <mesh key={i} position={[px, py, pz]}>
           <boxGeometry args={[sx, sy, sz]} />
-          <meshLambertMaterial color={palette.bone} />
+          <meshStandardMaterial color={palette.bone} />
           <Edges color={palette.ink} />
         </mesh>
       ))}
@@ -141,32 +163,45 @@ function RoomTile({ agent, position, onClick }: RootArchetypeProps) {
         position={[0, FLOOR_THICKNESS + WALL_H + 0.25, 0]}
         rotation={[-Math.PI / 6, 0, 0]}
         fontSize={0.26}
-        color={palette.ink}
+        color={labelColor}
         anchorX="center"
         anchorY="middle"
       >
         {agent.name}
       </Text>
+      {/* Phase W9 — floating status screen above the room. */}
+      {companyId && (
+        <group position={[0, FLOOR_THICKNESS + WALL_H + 2.6, 0]} userData={{ boundsIgnore: true }}>
+          <AgentScreen companyId={companyId} agentId={agent.id} />
+        </group>
+      )}
     </group>
   );
 }
 
-/** Floor at the campus root = a standalone slab with its own rooms. */
-function FloorTile({ agent, position, onClick }: RootArchetypeProps) {
+function FloorTile({ agent, position, companyId, onClick, onPointerDownTile, dragging }: RootArchetypeProps) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
+  const ref = useRef<Group>(null);
+  useHoverEmissive(ref, hovered);
   const [x, y, z] = position;
-  const lift = hovered ? 0.15 : 0;
+  useSmoothPosition(ref, [x, y, z], dragging === true);
+  const labelColor = useLabelColor();
   const W = 3.2;
   const H = 0.35;
   return (
     <group
-      position={[x, y + lift, z]}
-      onPointerOver={(e) => {
+      ref={ref}
+
+      onPointerEnter={(e) => {
         e.stopPropagation();
         setHovered(true);
       }}
-      onPointerOut={() => setHovered(false)}
+      onPointerLeave={() => setHovered(false)}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onPointerDownTile?.({ clientX: (e.nativeEvent as PointerEvent).clientX, clientY: (e.nativeEvent as PointerEvent).clientY });
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -174,107 +209,134 @@ function FloorTile({ agent, position, onClick }: RootArchetypeProps) {
     >
       <mesh position={[0, H / 2, 0]}>
         <boxGeometry args={[W, H, W]} />
-        <meshLambertMaterial color={palette.dustBlue} />
+        <meshStandardMaterial color={palette.dustBlue} />
         <Edges color={palette.ink} />
       </mesh>
       <Text
         position={[0, H + 0.25, 0]}
         rotation={[-Math.PI / 6, 0, 0]}
         fontSize={0.26}
-        color={palette.ink}
+        color={labelColor}
         anchorX="center"
         anchorY="middle"
       >
         {agent.name}
       </Text>
+      {/* Phase W9 — floating status screen above the floor slab. */}
+      {companyId && (
+        <group position={[0, H + 2.6, 0]} userData={{ boundsIgnore: true }}>
+          <AgentScreen companyId={companyId} agentId={agent.id} />
+        </group>
+      )}
     </group>
   );
 }
 
-/** Building tile — the common case. Matches the previous BuildingPlaceholder
- *  but refactored to take generic RootArchetype props. */
-function BuildingTile({ agent, position, companyId, onClick }: RootArchetypeProps) {
+function BuildingTile({ agent, position, companyId, onClick, onPointerDownTile, dragging }: RootArchetypeProps) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
+  const ref = useRef<Group>(null);
+  useHoverEmissive(ref, hovered);
   const [x, y, z] = position;
-  const lift = hovered ? 0.2 : 0;
+  useSmoothPosition(ref, [x, y, z], dragging === true);
+  const labelColor = useLabelColor();
   const buildingStatus = useContainerLiveStatus(companyId ?? "", agent.id);
   const windowsActive = buildingStatus === "running";
   const windowsIntensity = windowsActive ? 1.0 : 0.15;
+  const { children: descendants } = useContainerChildren(companyId ?? "", agent.id);
+  const hasWork = descendants.length > 0;
   return (
     <group
-      position={[x, y + lift, z]}
-      onPointerOver={(e) => {
+      ref={ref}
+
+      onPointerEnter={(e) => {
         e.stopPropagation();
         setHovered(true);
       }}
-      onPointerOut={() => setHovered(false)}
+      onPointerLeave={() => setHovered(false)}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onPointerDownTile?.({ clientX: (e.nativeEvent as PointerEvent).clientX, clientY: (e.nativeEvent as PointerEvent).clientY });
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
     >
-      <BuildingModel agentId={agent.id} />
-      <BuildingWindows
-        width={3}
-        height={3.2}
-        y={1.6}
-        z={1.5}
-        active={windowsActive}
-        intensity={windowsIntensity}
-        seed={agent.id}
+      <BuildingModel
+        agentId={agent.id}
+        showWindows={hasWork}
+        windowsActive={windowsActive}
+        windowsIntensity={windowsIntensity}
       />
       <Text
-        position={[0, 0.05, 1.8]}
+        // Phase X7 — keep the label INSIDE the hex tile (HEX_SIZE = 2.2
+        // so a tile vertex sits at z=2.2). Moved from z=2.3 → z=1.4 so
+        // the label hugs the building's footprint instead of spilling
+        // onto the next tile.
+        position={[0, 0.05, 1.4]}
         rotation={[-Math.PI / 2, 0, 0]}
         fontSize={0.32}
-        color={palette.ink}
+        color={labelColor}
         anchorX="center"
         anchorY="middle"
       >
         {agent.name}
       </Text>
+      {/* Phase X5 — building screen at y=6 sits comfortably above the
+          taller GLBs while keeping the screen visually attached to the
+          building rather than floating in empty sky. */}
+      {companyId && (
+        <group position={[0, 6, 0]} userData={{ boundsIgnore: true }}>
+          <AgentScreen companyId={companyId} agentId={agent.id} />
+        </group>
+      )}
     </group>
   );
 }
 
-/** Campus-layer root: a small cluster of 2 tiny buildings to indicate
- *  "this is a nested campus." Rare — most trees don't nest campuses. */
 function CampusTile(props: RootArchetypeProps) {
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
-  const { agent, position, onClick } = props;
+  const ref = useRef<Group>(null);
+  useHoverEmissive(ref, hovered);
+  const { agent, position, onClick, onPointerDownTile, dragging } = props;
   const [x, y, z] = position;
-  const lift = hovered ? 0.15 : 0;
+  useSmoothPosition(ref, [x, y, z], dragging === true);
+  const labelColor = useLabelColor();
   return (
     <group
-      position={[x, y + lift, z]}
-      onPointerOver={(e) => {
+      ref={ref}
+
+      onPointerEnter={(e) => {
         e.stopPropagation();
         setHovered(true);
       }}
-      onPointerOut={() => setHovered(false)}
+      onPointerLeave={() => setHovered(false)}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onPointerDownTile?.({ clientX: (e.nativeEvent as PointerEvent).clientX, clientY: (e.nativeEvent as PointerEvent).clientY });
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
     >
-      {/* Two miniature towers side by side */}
       <mesh position={[-0.6, 0.75, 0]}>
         <boxGeometry args={[0.8, 1.5, 0.8]} />
-        <meshLambertMaterial color={palette.bone} />
+        <meshStandardMaterial color={palette.bone} />
         <Edges color={palette.ink} />
       </mesh>
       <mesh position={[0.6, 1.1, 0]}>
         <boxGeometry args={[0.8, 2.2, 0.8]} />
-        <meshLambertMaterial color={palette.cream} />
+        <meshStandardMaterial color={palette.cream} />
         <Edges color={palette.ink} />
       </mesh>
       <Text
         position={[0, 2.6, 0]}
         rotation={[-Math.PI / 6, 0, 0]}
         fontSize={0.28}
-        color={palette.ink}
+        color={labelColor}
         anchorX="center"
         anchorY="middle"
       >
@@ -284,8 +346,6 @@ function CampusTile(props: RootArchetypeProps) {
   );
 }
 
-/** Pick the right child-route segment for a given layer, so the caller
- *  can build a navigation target in one line. */
 export function routeForLayer(
   layer: string | undefined,
 ): "agent" | "room" | "floor" | "building" | null {
@@ -293,5 +353,5 @@ export function routeForLayer(
   if (layer === "room") return "room";
   if (layer === "floor") return "floor";
   if (layer === "building") return "building";
-  return null; // campus: the root IS the canvas, nothing to route to
+  return null;
 }

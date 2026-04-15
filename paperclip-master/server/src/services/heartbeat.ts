@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import type { BillingType, ExecutionWorkspace, ExecutionWorkspaceConfig } from "@paperclipai/shared";
-import { readZootropolisCloseMarker } from "@paperclipai/shared";
+import { readZootropolisCloseMarker, readZootropolisLayer } from "@paperclipai/shared";
 import {
   agents,
   agentRuntimeState,
@@ -21,6 +21,7 @@ import {
 import { conflict, HttpError, notFound } from "../errors.js";
 import { logger } from "../middleware/logger.js";
 import { publishLiveEvent } from "./live-events.js";
+import { logActivity } from "./activity-log.js";
 import { getRunLogStore, type RunLogHandle } from "./run-log-store.js";
 import { getServerAdapter, runningProcesses } from "../adapters/index.js";
 import type { AdapterExecutionResult, AdapterInvocationMeta, AdapterSessionCodec, UsageSummary } from "../adapters/index.js";
@@ -937,6 +938,8 @@ async function buildPaperclipWakePayload(input: {
         id: string;
         identifier: string | null;
         title: string;
+        // Phase X: full description carried into the wake payload.
+        description: string | null;
         status: string;
         priority: string;
       }
@@ -953,6 +956,7 @@ async function buildPaperclipWakePayload(input: {
             id: issues.id,
             identifier: issues.identifier,
             title: issues.title,
+            description: issues.description,
             status: issues.status,
             priority: issues.priority,
           })
@@ -1039,6 +1043,17 @@ async function buildPaperclipWakePayload(input: {
           id: issueSummary.id,
           identifier: issueSummary.identifier,
           title: issueSummary.title,
+          // Phase X — include the full description in the wake payload so
+          // the agent sees the actual instruction at wake time, not only
+          // the title. Truncated to 4 KB to keep payloads bounded — if a
+          // description is longer the agent should fall back to
+          // /api/issues/:id/heartbeat-context for the full text.
+          description:
+            typeof issueSummary.description === "string"
+              ? issueSummary.description.length > 4000
+                ? issueSummary.description.slice(0, 4000) + "\n[…truncated; fetch heartbeat-context for full]"
+                : issueSummary.description
+              : null,
           status: issueSummary.status,
           priority: issueSummary.priority,
         }
@@ -1065,8 +1080,13 @@ async function buildPaperclipWakePayload(input: {
  * this to learn the close-marker contract. Leaf external daemons can
  * also fall back on it if their skills/ directory got out of sync.
  */
-const ZOOTROPOLIS_PREAMBLE = {
-  version: 1,
+export const ZOOTROPOLIS_PREAMBLE = {
+  version: 5,
+  // Loud, top-level directive read before anything else. Wins over any
+  // skill, prompt, or convention that says "do the work" — this preamble
+  // is the Zootropolis governance layer and overrides per-agent skills.
+  ATTENTION:
+    "If your metadata.zootropolis.layer is room/floor/building/campus, you are a CONTAINER agent. Container agents DO NOT DO WORK. Your only legitimate actions are to DECOMPOSE the assigned issue, DELEGATE sub-issues to direct reports one layer below, SYNTHESISE their finished artifacts, or ANSWER a single trivial factual question. Anything that looks like \"writing the deliverable\" — code, specs, docs, research, designs, plans — must be delegated. If a skill (e.g. the Paperclip skill's \"Step 7 — Do the work\") tells you to execute, the Zootropolis preamble overrides it for container agents. Read containersOnly below before you act.",
   // Rules every agent must follow to close its assigned issue. Applies to
   // leaves and containers alike.
   allAgents: [
@@ -1085,20 +1105,70 @@ const ZOOTROPOLIS_PREAMBLE = {
   // returns 409 on skip-layer or sideways assignments.
   containersOnly: {
     applies: "agents with metadata.zootropolis.layer in room|floor|building|campus",
+    // EXHAUSTIVE list of legal actions for a container agent. If what you
+    // are about to do is not on this list, STOP. There is no fifth thing.
+    // This is the upper bound on your capabilities — not a starting point
+    // to extend.
+    legalActionsExhaustive: [
+      "DECOMPOSE — split the issue assigned to you into the smallest set of sub-tasks that, when completed and synthesised, fully answer the parent.",
+      "DELEGATE — POST each sub-task as a sub-issue to a direct report whose layer is exactly one rung below yours, with parentId set to the issue assigned to you.",
+      "SYNTHESISE — once ALL your sub-issues are `done`/`cancelled`, write a close-marker artifact that combines their artifacts into the answer to your parent issue.",
+      "TRIVIALLY ANSWER — if the entire issue is one factual question with a one-line answer needing zero research, code, or file access, answer it in your close artifact directly.",
+    ],
+    illegalActionsExamples: [
+      "Writing a spec, doc, plan, or design document yourself — illegal, delegate.",
+      "Doing research (web, codebase, competitive analysis) — illegal, delegate.",
+      "Writing or editing code, running builds or tests — illegal, delegate.",
+      "Producing diagrams, illustrations, or any deliverable artifact — illegal, delegate.",
+      "Summarising external material the user linked — illegal, delegate the read+summarise.",
+      "Calling the `Used Skill` Paperclip flow's \"Step 7 — Do the work\" yourself — illegal, that step is for leaves only.",
+      "Closing the issue with an artifact you wrote — illegal unless every word of the artifact came from a sub-issue artifact you synthesised.",
+    ],
+    skillOverride:
+      "OVERRIDE NOTICE: if any skill, prompt, or convention loaded in your context tells a container agent to execute the work directly (e.g. the Paperclip skill says \"Step 7 — Do the work\"), the Zootropolis preamble takes precedence. The Paperclip skill was written for generic IC agents; you are a Zootropolis container agent and the only legitimate actions are listed in `legalActionsExhaustive` above.",
+    drainMode: {
+      summary:
+        "DRAIN YOUR INBOX EACH HEARTBEAT. Container actions are cheap (decompose+delegate is sub-minute, no deliverable production), so the IC convention of \"one task per heartbeat\" does NOT apply to you. When you wake, fetch your full inbox and process EVERY actionable assigned issue this heartbeat — do not exit after handling only the wake-target. This collapses queue latency from O(N heartbeats) to O(1).",
+      procedure: [
+        "After identity + initial wake-target handling, GET /api/agents/me/inbox-lite to see all your assigned issues.",
+        "For each issue in status `todo` or `in_progress` (skip `blocked` unless you can unblock it): checkout, decompose, delegate sub-issues to direct reports, comment, and move on. Do NOT do the work.",
+        "If a checkout returns 409, skip that issue (someone else holds it) and continue draining the rest. Never retry a 409.",
+        "If a sub-issue create returns 409 from the layer-adjacency rule, fix your assignee (you skipped a layer) and retry that single create. Do not abort the drain.",
+        "Soft cap: process up to ~10 issues per heartbeat to keep context bounded. If you have more, exit cleanly — a fresh wake will handle the rest, and the wake-coalescing layer will not duplicate work.",
+        "If your inbox is empty after the wake-target, exit immediately. Do NOT poll or self-assign.",
+      ],
+      leavesNote:
+        "This rule applies ONLY to container agents (room/floor/building/campus). Leaf agents (`agent` layer) continue to follow \"one task per heartbeat\" because their work is expensive and context-heavy.",
+    },
+    // Read this BEFORE you start planning the task. If you skip to "how do I
+    // do this work" you have already broken the rule.
+    jobDescription:
+      "YOUR JOB IS TO DECOMPOSE AND DELEGATE. You are a container/manager agent. Your two-step routine for every issue assigned to you is: (1) DECOMPOSE — break the issue into the smallest set of sub-tasks that, when completed and synthesised, fully answer the parent issue; (2) DELEGATE — POST each sub-task as a sub-issue to a direct report whose layer is exactly one rung below yours. You then wait. Only after every sub-issue is `done`/`cancelled` do you act again — to SYNTHESISE their artifacts into your own close. Decomposition is the entire point of your role; if you cannot see how to decompose an issue, ask a clarifying question via a comment, do not start doing the work.",
+    mostImportantRule:
+      "DELEGATE 99% OF TASKS. The default action for any issue assigned to you is to POST a sub-issue to a direct report. There are EXACTLY TWO exceptions where you may act yourself: (1) SYNTHESIS — all of your sub-issues for this issue are already `done` or `cancelled`, and you are writing the artifact that combines their results; (2) TRIVIAL Q&A — the issue is literally a single factual question with a one-line answer that requires no research, no file access, no code, no external lookup. ANYTHING ELSE — research, writing a doc/spec/plan, coding, designing, analysing, summarising external material, running a build, producing a deliverable of any kind — MUST be delegated, even if you think you could do it faster yourself. \"I'll just do it\" is the failure mode this rule exists to prevent.",
+    layerRule:
+      "YOU MAY ONLY DELEGATE TO THE LAYER IMMEDIATELY BELOW YOURS. The Zootropolis layer ladder is leaf(`agent`) → `room` → `floor` → `building` → `campus`. Allowed delegations: campus→building, building→floor, floor→room, room→leaf. Skip-layer assignments are server-rejected with 409, even if a leaf appears to report directly to you in the org chart — the layer adjacency rule is enforced on top of the reportsTo check (Phase S). If you are a floor and the work needs leaf execution, your sub-issue goes to a ROOM under you; that room then decomposes further and delegates to its leaves.",
     rules: [
-      "You may only assign issues to a direct report of yours.",
-      "Never skip layers. Never assign to a sibling. Server enforces with 409.",
-      "When your children's sub-issues all close, distil their artifacts into your own close artifact.",
+      "YOU ARE A MANAGER, NOT AN EXECUTOR. Only leaf agents do work. For any issue assigned to you, your only valid actions are: (a) POST sub-issues to your direct reports, or (b) once ALL your sub-issues are `done` or `cancelled`, close your own issue with a synthesis `artifact` summarising their work.",
+      "Decision procedure when an issue is assigned to you: STEP 1 — is it a trivial single-fact question? If yes, answer it. STEP 2 — are all sub-issues for it already closed? If yes, synthesise and close. STEP 3 — OTHERWISE, post sub-issue(s) to direct reports and stop. Do NOT proceed to do the work yourself under any other condition.",
+      "Things that count as WORK and must be delegated, not done by you: writing a spec, writing docs, doing research (including web research, codebase exploration, competitive analysis), writing or editing code, producing diagrams or illustrations, running builds or tests, drafting plans, summarising external material. If the issue would take a leaf agent more than ~2 minutes, it is work — delegate it.",
+      "You MUST NOT attempt the work yourself — writing code, running builds, producing deliverables belongs to leaves. Your artifact is a SYNTHESIS of sub-issue artifacts, not a first-party product.",
+      "Server-side hard reject: closing your issue with zero sub-issues is refused. Closing with any sub-issue still open is refused. You'll be re-woken with a violation comment.",
+      "You may only assign issues to a direct report of yours (an agent whose reportsTo is you). Never skip layers, never assign to a sibling — server returns 409.",
+      "Bad pattern A: issue says \"build a calculator app\" → you write the HTML yourself and close. REJECTED. Correct: split into `design`/`implement`/`test` sub-issues to your reports, wait for them to close, synthesise.",
+      "Bad pattern B: issue says \"write a spec for an LLM-based OS, with architecture, competition analysis, and illustrations\" → you start drafting the spec yourself. REJECTED. Correct: post separate sub-issues for `architecture spec`, `competitor analysis`, and `illustrations` to direct reports; once they close, synthesise their artifacts into your own close artifact.",
+      "Bad pattern C: issue says \"research how X works and summarise\" → you start reading and summarising. REJECTED. Research is work. Delegate the research to a report; synthesise their findings.",
+      "Bad pattern D (skip-layer): you are a floor and post a sub-issue assigned directly to a leaf agent. REJECTED with 409. The leaf is two rungs below you. Correct: assign the sub-issue to a ROOM under you; that room decomposes further and delegates to its own leaves. The server enforces this even if the leaf's reportsTo points at you — fix the org chart instead of bypassing the layer.",
     ],
     api: {
       path: "POST /api/companies/<companyId>/issues",
       body: {
         title: "string",
         description: "string",
-        assigneeAgentId: "<uuid of your direct child>",
-        createdByAgentId: "<your own uuid>",
-        parentId: "<the issue you were assigned, so lineage is preserved>",
+        assigneeAgentId: "<uuid of your direct child; server pins createdByAgentId = assigneeAgentId>",
+        parentId: "<the issue you were assigned, REQUIRED so lineage is preserved>",
       },
+      note: "Phase R invariant: every issue has createdByAgentId === assigneeAgentId. You do NOT set createdByAgentId yourself — the server derives it from assigneeAgentId. Your authorship-as-delegator is tracked via the request actor, separate from the stored field.",
     },
   },
   closeMarkerSchema: {
@@ -1304,6 +1374,41 @@ export function heartbeatService(db: Db) {
       .then((rows) => rows[0] ?? null);
   }
 
+  // Phase T: heartbeat-driven issue mutations bypass routes/issues.ts and
+  // therefore did not fire `activity.logged` WS events — leaving the UI to
+  // wait for incidental refetches. This helper keeps live updates flowing
+  // for issue.updated and issue.comment_added that originate inside the
+  // heartbeat runner. Failures are swallowed: missing telemetry should
+  // never break run finalization. We do not log issue.created here; agent
+  // sub-issue creation goes through routes/issues.ts which already logs.
+  async function logIssueActivityFromHeartbeat(input: {
+    companyId: string;
+    action: "issue.updated" | "issue.comment_added";
+    issueId: string;
+    agentId: string;
+    runId: string | null;
+    details?: Record<string, unknown>;
+  }) {
+    try {
+      await logActivity(db, {
+        companyId: input.companyId,
+        actorType: "agent",
+        actorId: input.agentId,
+        agentId: input.agentId,
+        runId: input.runId ?? null,
+        action: input.action,
+        entityType: "issue",
+        entityId: input.issueId,
+        details: input.details ?? null,
+      });
+    } catch (err) {
+      logger.warn(
+        { err, issueId: input.issueId, action: input.action },
+        "heartbeat: failed to log issue activity (UI live update may lag)",
+      );
+    }
+  }
+
   async function getRun(runId: string) {
     return db
       .select()
@@ -1318,6 +1423,9 @@ export function heartbeatService(db: Db) {
         id: issues.id,
         identifier: issues.identifier,
         title: issues.title,
+        // Phase X: include description so it can flow into the wake
+        // payload (where the agent reads its assignment instructions).
+        description: issues.description,
         status: issues.status,
         priority: issues.priority,
         projectId: issues.projectId,
@@ -2842,6 +2950,9 @@ export function heartbeatService(db: Db) {
           id: issueContext.id,
           identifier: issueContext.identifier,
           title: issueContext.title,
+          // Phase X: forward the description so the wake payload can
+          // include the actual instruction, not just the title.
+          description: issueContext.description ?? null,
           status: issueContext.status,
           priority: issueContext.priority,
           projectId: issueContext.projectId,
@@ -2859,6 +2970,7 @@ export function heartbeatService(db: Db) {
             id: issueRef.id,
             identifier: issueRef.identifier,
             title: issueRef.title,
+            description: issueRef.description,
             status: issueRef.status,
             priority: issueRef.priority,
           }
@@ -3323,6 +3435,14 @@ export function heartbeatService(db: Db) {
             }),
             { agentId: agent.id, runId: run.id },
           );
+          await logIssueActivityFromHeartbeat({
+            companyId: agent.companyId,
+            action: "issue.comment_added",
+            issueId,
+            agentId: agent.id,
+            runId: run.id,
+            details: { source: "workspace_ready" },
+          });
         } catch (err) {
           await onLog(
             "stderr",
@@ -3420,6 +3540,14 @@ export function heartbeatService(db: Db) {
               }),
               { agentId: agent.id, runId: run.id },
             );
+            await logIssueActivityFromHeartbeat({
+              companyId: agent.companyId,
+              action: "issue.comment_added",
+              issueId,
+              agentId: agent.id,
+              runId: run.id,
+              details: { source: "adapter_managed_runtime_ready" },
+            });
           } catch (err) {
             await onLog(
               "stderr",
@@ -3576,6 +3704,14 @@ export function heartbeatService(db: Db) {
                   "a non-empty artifact.",
                 { agentId: agent.id, runId: finalizedRun.id },
               );
+              await logIssueActivityFromHeartbeat({
+                companyId: agent.companyId,
+                action: "issue.comment_added",
+                issueId,
+                agentId: agent.id,
+                runId: finalizedRun.id,
+                details: { source: "close_rejected_empty_artifact" },
+              });
             } catch (err) {
               await onLog(
                 "stderr",
@@ -3590,35 +3726,146 @@ export function heartbeatService(db: Db) {
               payload: { issueId },
             });
           } else if (closeMarker) {
-            // Valid close — post artifact (preferred) or summary, then transition.
-            try {
-              const issueComment = rawArtifact || rawSummary;
-              if (issueComment) {
-                await issuesSvc.addComment(issueId, issueComment, { agentId: agent.id, runId: finalizedRun.id });
+            // Phase R3/R4 gates: only the assignee==creator may close, and
+            // container agents must have sub-issues that all closed before
+            // they can synthesise. If either gate fails we post a violation
+            // comment and leave the issue open so the agent can retry.
+            const issueForClose = await issuesSvc.getById(issueId).catch(() => null);
+            const agentLayer = readZootropolisLayer(agent.metadata);
+            const isContainerAgent = agentLayer != null && agentLayer !== "agent";
+
+            let rejectionMessage: string | null = null;
+            let subIssues: Array<{ id: string; status: string }> | null = null;
+
+            if (!issueForClose) {
+              rejectionMessage = null; // issue vanished; fall through to legacy update attempt (which will fail cleanly)
+            } else if (
+              issueForClose.assigneeAgentId != null &&
+              issueForClose.assigneeAgentId !== agent.id
+            ) {
+              // Phase S: only the assignee may close their own issue. (Phase R
+              // used createdByAgentId for this check via an invariant that
+              // pinned createdBy == assignee; Phase S drops that override and
+              // checks assigneeAgentId directly. No auto-cascade close — the
+              // parent's assignee must explicitly close their own issue after
+              // synthesising sub-issue artifacts.)
+              rejectionMessage =
+                "[zootropolis] Close marker rejected: only the assignee of an issue " +
+                "may close it. This issue is assigned to a different agent — post a comment " +
+                "to escalate instead. The issue remains open.";
+            } else if (isContainerAgent) {
+              // R4: container agents must delegate, not execute. Require at least
+              // one sub-issue and all must be in a terminal status.
+              try {
+                const children = await issuesSvc.list(agent.companyId, { parentId: issueId });
+                subIssues = children.map((c) => ({ id: c.id, status: c.status }));
+              } catch (err) {
+                await onLog(
+                  "stderr",
+                  `[paperclip] Zootropolis: failed to load sub-issues for container close gate: ${err instanceof Error ? err.message : String(err)}\n`,
+                );
               }
-            } catch (err) {
-              await onLog(
-                "stderr",
-                `[paperclip] Failed to post run summary comment: ${err instanceof Error ? err.message : String(err)}\n`,
-              );
+              if (subIssues && subIssues.length === 0) {
+                rejectionMessage =
+                  "[zootropolis] Close marker rejected: you are a container agent and must " +
+                  "delegate. Create at least one sub-issue assigned to a direct report " +
+                  "(POST /api/companies/<companyId>/issues with parentId=<this issue>), wait " +
+                  "for it to close, then synthesise its artifact into your own close. " +
+                  "The issue remains open.";
+              } else if (subIssues) {
+                const openSub = subIssues.find((s) => s.status !== "done" && s.status !== "cancelled");
+                if (openSub) {
+                  rejectionMessage =
+                    `[zootropolis] Close marker rejected: sub-issue ${openSub.id} is still ` +
+                    `\`${openSub.status}\`. Wait for all sub-issues to reach \`done\` or ` +
+                    `\`cancelled\`, then synthesise their artifacts into your own close. ` +
+                    `The issue remains open.`;
+                }
+              }
             }
-            try {
-              await issuesSvc.update(issueId, {
-                status: closeMarker.status ?? "done",
-                actorAgentId: agent.id,
-              });
+
+            if (rejectionMessage) {
+              try {
+                await issuesSvc.addComment(issueId, rejectionMessage, {
+                  agentId: agent.id,
+                  runId: finalizedRun.id,
+                });
+                await logIssueActivityFromHeartbeat({
+                  companyId: agent.companyId,
+                  action: "issue.comment_added",
+                  issueId,
+                  agentId: agent.id,
+                  runId: finalizedRun.id,
+                  details: { source: "close_gate_rejection" },
+                });
+              } catch (err) {
+                await onLog(
+                  "stderr",
+                  `[paperclip] Failed to post close-rejection comment: ${err instanceof Error ? err.message : String(err)}\n`,
+                );
+              }
               await appendRunEvent(finalizedRun, seq++, {
                 eventType: "lifecycle",
                 stream: "system",
-                level: "info",
-                message: `zootropolis: agent closed issue (status=${closeMarker.status ?? "done"})`,
-                payload: { issueId, status: closeMarker.status ?? "done" },
+                level: "warn",
+                message: "zootropolis: close marker rejected (Phase R gate)",
+                payload: {
+                  issueId,
+                  reason:
+                    issueForClose && issueForClose.assigneeAgentId !== agent.id
+                      ? "not_assignee"
+                      : isContainerAgent && subIssues && subIssues.length === 0
+                        ? "container_no_sub_issues"
+                        : "container_sub_issue_open",
+                },
               });
-            } catch (err) {
-              await onLog(
-                "stderr",
-                `[paperclip] Zootropolis: failed to apply close marker: ${err instanceof Error ? err.message : String(err)}\n`,
-              );
+            } else {
+              // Valid close — post artifact (preferred) or summary, then transition.
+              try {
+                const issueComment = rawArtifact || rawSummary;
+                if (issueComment) {
+                  await issuesSvc.addComment(issueId, issueComment, { agentId: agent.id, runId: finalizedRun.id });
+                  await logIssueActivityFromHeartbeat({
+                    companyId: agent.companyId,
+                    action: "issue.comment_added",
+                    issueId,
+                    agentId: agent.id,
+                    runId: finalizedRun.id,
+                    details: { source: "close_artifact" },
+                  });
+                }
+              } catch (err) {
+                await onLog(
+                  "stderr",
+                  `[paperclip] Failed to post run summary comment: ${err instanceof Error ? err.message : String(err)}\n`,
+                );
+              }
+              try {
+                await issuesSvc.update(issueId, {
+                  status: closeMarker.status ?? "done",
+                  actorAgentId: agent.id,
+                });
+                await logIssueActivityFromHeartbeat({
+                  companyId: agent.companyId,
+                  action: "issue.updated",
+                  issueId,
+                  agentId: agent.id,
+                  runId: finalizedRun.id,
+                  details: { status: closeMarker.status ?? "done", source: "close_marker" },
+                });
+                await appendRunEvent(finalizedRun, seq++, {
+                  eventType: "lifecycle",
+                  stream: "system",
+                  level: "info",
+                  message: `zootropolis: agent closed issue (status=${closeMarker.status ?? "done"})`,
+                  payload: { issueId, status: closeMarker.status ?? "done" },
+                });
+              } catch (err) {
+                await onLog(
+                  "stderr",
+                  `[paperclip] Zootropolis: failed to apply close marker: ${err instanceof Error ? err.message : String(err)}\n`,
+                );
+              }
             }
           } else {
             // No Zootropolis marker at all — legacy Paperclip path:
@@ -3628,6 +3875,14 @@ export function heartbeatService(db: Db) {
               const issueComment = buildHeartbeatRunIssueComment(persistedResultJson);
               if (issueComment) {
                 await issuesSvc.addComment(issueId, issueComment, { agentId: agent.id, runId: finalizedRun.id });
+                await logIssueActivityFromHeartbeat({
+                  companyId: agent.companyId,
+                  action: "issue.comment_added",
+                  issueId,
+                  agentId: agent.id,
+                  runId: finalizedRun.id,
+                  details: { source: "legacy_run_summary" },
+                });
               }
             } catch (err) {
               await onLog(

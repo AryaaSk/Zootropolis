@@ -12,6 +12,7 @@ import {
   createAgentSchema,
   deriveAgentUrlKey,
   isUuidLike,
+  readZootropolisLayer,
   resetAgentSessionSchema,
   testAdapterEnvironmentSchema,
   type AgentSkillSnapshot,
@@ -70,6 +71,8 @@ import { ensureOpenCodeModelConfiguredAndAvailable } from "@paperclipai/adapter-
 import {
   loadDefaultAgentInstructionsBundle,
   resolveDefaultAgentInstructionsBundleRole,
+  resolveAgentInstructionsBundleRole,
+  ZOOTROPOLIS_CONTAINER_INSTRUCTIONS_MARKER,
 } from "../services/default-agent-instructions.js";
 import { getTelemetryClient } from "../telemetry.js";
 
@@ -558,6 +561,7 @@ export function agentRoutes(db: Db) {
     role: string;
     adapterType: string;
     adapterConfig: unknown;
+    metadata?: unknown;
   }>(agent: T): Promise<T> {
     if (!DEFAULT_MANAGED_INSTRUCTIONS_ADAPTER_TYPES.has(agent.adapterType)) {
       return agent;
@@ -577,8 +581,15 @@ export function agentRoutes(db: Db) {
     const promptTemplate = typeof adapterConfig.promptTemplate === "string"
       ? adapterConfig.promptTemplate
       : "";
+    // Phase Y — resolveAgentInstructionsBundleRole sniffs
+    // metadata.zootropolis.layer; container agents (room/floor/building/
+    // campus) get the Zootropolis-container bundle (strict decompose+
+    // delegate AGENTS.md), everyone else falls back to the role-based
+    // default (engineer/general/ceo).
     const files = promptTemplate.trim().length === 0
-      ? await loadDefaultAgentInstructionsBundle(resolveDefaultAgentInstructionsBundleRole(agent.role))
+      ? await loadDefaultAgentInstructionsBundle(
+          resolveAgentInstructionsBundleRole({ role: agent.role, metadata: agent.metadata }),
+        )
       : { "AGENTS.md": promptTemplate };
     const materialized = await instructions.materializeManagedBundle(
       agent,
@@ -2630,6 +2641,100 @@ export function agentRoutes(db: Db) {
       adapterType: agent.adapterType,
     });
   });
+
+  /**
+   * Phase Y backfill — rewrite every container agent's AGENTS.md with
+   * the latest Zootropolis container template. Idempotent: an agent
+   * whose AGENTS.md already contains the
+   * `ZOOTROPOLIS_CONTAINER_INSTRUCTIONS_MARKER` and matches the latest
+   * template is left alone; mismatches and missing files are
+   * regenerated with `replaceExisting: true`.
+   *
+   * Trigger once after deploying a new container template, or any
+   * time you want to retroactively apply container instructions to a
+   * company's existing agents.
+   *
+   * Board-only.
+   */
+  router.post(
+    "/companies/:companyId/zootropolis/refresh-container-instructions",
+    async (req, res) => {
+      assertBoard(req);
+      const companyId = req.params.companyId as string;
+      assertCompanyAccess(req, companyId);
+
+      // Load the latest container template once — same content the hire
+      // flow would write for a brand-new container agent.
+      const containerBundle = await loadDefaultAgentInstructionsBundle(
+        "zootropolis-container",
+      );
+      const latestAgentsMd = containerBundle["AGENTS.md"];
+      if (typeof latestAgentsMd !== "string") {
+        res.status(500).json({ error: "Container template missing AGENTS.md" });
+        return;
+      }
+
+      const allAgents = await svc.list(companyId);
+      const containerAgents = allAgents.filter((agent) => {
+        const layer = readZootropolisLayer(
+          (agent as { metadata?: unknown }).metadata,
+        );
+        return (
+          layer === "room" ||
+          layer === "floor" ||
+          layer === "building" ||
+          layer === "campus"
+        );
+      });
+
+      const summary = {
+        scanned: containerAgents.length,
+        rewritten: 0,
+        skipped: 0,
+        skippedAdapter: 0,
+        errors: [] as Array<{ agentId: string; message: string }>,
+      };
+
+      for (const agent of containerAgents) {
+        // Skip adapters that don't use the managed-instructions bundle
+        // pattern (no instructionsFilePath equivalent).
+        if (!DEFAULT_MANAGED_INSTRUCTIONS_ADAPTER_TYPES.has(agent.adapterType)) {
+          summary.skippedAdapter += 1;
+          continue;
+        }
+
+        try {
+          // Check if the agent already has the latest template — skip if so.
+          const existing = await instructions
+            .readFile(agent, "AGENTS.md")
+            .catch(() => null);
+          const existingContent = existing?.content ?? "";
+          if (
+            existingContent.includes(ZOOTROPOLIS_CONTAINER_INSTRUCTIONS_MARKER) &&
+            existingContent.trim() === latestAgentsMd.trim()
+          ) {
+            summary.skipped += 1;
+            continue;
+          }
+
+          const materialized = await instructions.materializeManagedBundle(
+            agent,
+            containerBundle,
+            { entryFile: "AGENTS.md", replaceExisting: true },
+          );
+          await svc.update(agent.id, { adapterConfig: materialized.adapterConfig });
+          summary.rewritten += 1;
+        } catch (err) {
+          summary.errors.push({
+            agentId: agent.id,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      res.json(summary);
+    },
+  );
 
   return router;
 }

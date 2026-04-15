@@ -7,11 +7,17 @@ import { palette } from "../palette";
 import { useAgentLiveStatus } from "../hooks/useAgentLiveStatus";
 import { useLowQualityMode } from "../lib/quality-mode";
 import { StatusLight } from "./StatusLight";
+import { AgentStatusHalo } from "./AgentStatusHalo";
 import { AnimalModel } from "./models/AnimalModel";
 
 interface AnimalProps {
   color?: string;
   position?: [number, number, number];
+  /**
+   * Visual size tier forwarded to AnimalModel. Default tile-size on
+   * campus/floor/room views; "large" used by AgentView.
+   */
+  size?: "default" | "large";
   /**
    * Optional agent id. When provided, the animal subscribes to the live event
    * stream and plays a one-shot scale pulse on every heartbeat.run.started
@@ -143,6 +149,7 @@ function ProceduralAnimal({ bodyColor }: { bodyColor: string }) {
  * With an agentId, pulses on heartbeat.run.started and status-lights the run.
  */
 export function Animal({
+  size = "default",
   color = palette.terracotta,
   position = [0, 0, 0],
   agentId,
@@ -209,10 +216,15 @@ export function Animal({
 
   return (
     <group ref={groupRef} position={position}>
+      {/* Phase S4: soft emissive status halo under the animal. Colour &
+          pulse rate encode live run state (idle/running/completed/failed
+          / unreachable) so a campus glance reveals who's working. */}
+      <AgentStatusHalo status={status} unreachable={unreachable} />
+
       {lowQuality ? (
         <ProceduralAnimal bodyColor={bodyColor} />
       ) : (
-        <AnimalModel role={role} agentId={agentId} color={bodyColor} />
+        <AnimalModel role={role} agentId={agentId} color={bodyColor} size={size} />
       )}
 
       {renderStatusLight && <StatusLight status={status} unreachable={unreachable} />}

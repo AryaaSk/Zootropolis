@@ -1,15 +1,20 @@
 import { useMemo, useState } from "react";
+import { INSPECTOR_OPEN_WIDTH, useInspectorOpen } from "../lib/useInspectorOpen";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   readZootropolisLayer,
+  readZootropolisPos,
   ZOOTROPOLIS_LAYERS,
   type Agent,
   type Issue,
   type ZootropolisAgentMetadata,
   type ZootropolisLayer,
 } from "@paperclipai/shared";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Loader2 } from "lucide-react";
 import { useNavigate } from "@/lib/router";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { agentsApi } from "../../../api/agents";
 import { useDialog } from "../../../context/DialogContext";
 import { queryKeys } from "../../../lib/queryKeys";
@@ -19,55 +24,34 @@ import { useContainerIssues } from "../hooks/useContainerIssues";
 import { useContainerLiveStatus } from "../hooks/useContainerLiveStatus";
 import { IssueQuickLook } from "./IssueQuickLook";
 import { AddToExistingButton } from "./AddToExistingDialog";
-import { palette } from "../palette";
-
-/**
- * Tailwind class for each Zootropolis layer pill — matches OrgChart.tsx so
- * the badge reads the same everywhere it appears.
- */
-const LAYER_PILL_CLASS: Record<ZootropolisLayer, string> = {
-  agent: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
-  room: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
-  floor: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-200",
-  building:
-    "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
-  campus: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200",
-};
+import { layerPillClass } from "../lib/layer-pill";
 
 type HireSpec = {
   label: string;
-  /** Layer of the agent that will be created. */
   layer: ZootropolisLayer;
 };
 
-/**
- * Phase I2: hiring is now campus-root only, and only produces leaf agents.
- * Structure (rooms/floors/buildings/campus-layer containers) is built by
- * wrapping or re-parenting existing agents — never by "hiring into X".
- * The old hireOptionsFor() with per-layer options has been removed.
- */
 function hireOptionsFor(
   currentLayer: ZootropolisLayer | "campus-root",
 ): HireSpec[] {
-  // Only campus-root offers a hire action, and it always creates a leaf.
-  // The endpoint field (required, Phase I1) is collected by HireForm.
   if (currentLayer === "campus-root") {
-    return [{ label: "+ Hire an agent", layer: "agent" }];
+    return [{ label: "Hire an agent", layer: "agent" }];
   }
   return [];
 }
 
 /**
- * Return the layer one step *above* the given layer — used by F3 "Wrap me in".
- * campus has no next-up (it's already the root concept).
+ * Next layer you can wrap an agent INTO. Caps at `building` — `campus`
+ * is implicit (one per company, auto-created) and never a user-choose
+ * wrap target.
  */
 function nextLayerUp(layer: ZootropolisLayer): ZootropolisLayer | null {
-  const idx = ZOOTROPOLIS_LAYERS.indexOf(layer);
-  if (idx < 0 || idx >= ZOOTROPOLIS_LAYERS.length - 1) return null;
-  return ZOOTROPOLIS_LAYERS[idx + 1] ?? null;
+  if (layer === "agent") return "room";
+  if (layer === "room") return "floor";
+  if (layer === "floor") return "building";
+  return null; // building → nothing to wrap into; campus → already at top
 }
 
-/** Route segment for a given container layer (matches AppRoutes). */
 function routeForLayer(layer: ZootropolisLayer): string | null {
   switch (layer) {
     case "room":
@@ -77,8 +61,6 @@ function routeForLayer(layer: ZootropolisLayer): string | null {
     case "building":
       return "building";
     case "campus":
-      // Campus-layer roots live directly under /campus/<companyId>; the user
-      // doesn't navigate into them as a container — they ARE the canvas.
       return null;
     case "agent":
       return "agent";
@@ -89,37 +71,21 @@ function routeForLayer(layer: ZootropolisLayer): string | null {
 
 interface ContainerInspectorProps {
   companyId: string;
-  /** null on the campus root view. */
   agentId: string | null;
-  /** Optional: hide the hire footer (F1 CampusView handles empty-state itself). */
   hideHireFooter?: boolean;
-  /** Start open? Default: closed (user clicks the chevron to peek). */
   defaultOpen?: boolean;
 }
 
 /**
  * ContainerInspector — right-edge slide-in drawer for every campus view.
- *
  * Mirrors the Minimap's anchor pattern: an HTML overlay mounted as a sibling
  * of the R3F <Canvas> (the parent div is already position: relative per B8).
  *
- * Phase E2: Header (name + layer pill + live dot), two issue sections
- * ("Tasks delegated" / "Tasks I owe") — or a runtime/identity card on the
- * leaf agent view.
- *
- * Phase E3: "+ Delegate to <child>" buttons per direct child (container
- * layers), plus "+ New task for this <layer>" for top-level work that
- * targets the container itself. Leaf agents only see "+ Receive new task".
- *
- * Phase E4: Clicking an IssueRow swaps the drawer body out for an embedded
- * IssueQuickLook; a back arrow restores the layer overview.
- *
- * Phase F2: Footer with layer-aware "+ Hire <next layer down>" buttons that
- * expand into an inline name form and POST to /api/companies/:id/agents.
- *
- * Phase F3: "+ Wrap me in a <next-up>" button — create a new container
- * agent that takes this agent's old parent, then re-parent this agent to
- * the new container.
+ * Phase U: restyled to use Paperclip semantic tokens (bg-card, border-border,
+ * text-foreground/text-muted-foreground) and shadcn primitives (Button,
+ * Input) instead of the Townscaper cream palette + inline styles. Keeps the
+ * 3D scene's warm aesthetic intact while the chrome reads like the rest of
+ * Paperclip.
  */
 export function ContainerInspector({
   companyId,
@@ -127,7 +93,11 @@ export function ContainerInspector({
   hideHireFooter = false,
   defaultOpen = false,
 }: ContainerInspectorProps) {
-  const [open, setOpen] = useState(defaultOpen);
+  // Phase T polish — sidebar state lifted to a shared hook so each
+  // view's outer layout can resize the canvas around it (instead of
+  // overlaying). Persisted to localStorage; survives navigation +
+  // reload and stays in sync across components.
+  const [open, setOpen] = useInspectorOpen(defaultOpen);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const { self, children } = useContainerChildren(companyId, agentId);
   const { issuedDown, receivedFromAbove, loading } = useContainerIssues(
@@ -146,53 +116,40 @@ export function ContainerInspector({
     return self?.name ?? agentId.slice(0, 8);
   }, [agentId, companyId, self]);
 
-  // For the footer "Hire" controls.
   const hireOptions = hideHireFooter ? [] : hireOptionsFor(selfLayer);
   const showTasksDelegated = selfLayer !== "agent";
   const showTasksOwed = selfLayer !== "campus-root" && selfLayer !== "campus";
   const isLeaf = selfLayer === "agent";
 
-  // The "received task" whose lineage new delegations should extend (E3).
-  // Picks the most recently updated received task; useContainerIssues already
-  // orders desc.
   const currentReceivedTask = receivedFromAbove[0] ?? null;
 
-  // F3: wrap-in is available for every non-root layer that can be
-  // promoted upward. campus-root has no "above".
   const wrapInLayer =
     selfLayer === "campus-root" ? null : nextLayerUp(selfLayer);
 
   return (
     <>
-      {/* Toggle chevron — always visible on the right edge. */}
+      {/* Toggle chevron — sits on the inspector's left edge as a real
+          layout-affecting element when the inspector is open, or floats
+          on the right edge as a tab when it's closed. The wrapper view
+          uses INSPECTOR_OPEN_WIDTH to size the canvas around it. */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Hide inspector" : "Show inspector"}
-        className="pointer-events-auto absolute top-1/2 z-20 -translate-y-1/2 rounded-l-md border border-r-0 p-1 shadow-sm transition-[right] backdrop-blur-md"
-        style={{
-          right: open ? 360 : 0,
-          backgroundColor: `${palette.bone}e6`,
-          borderColor: palette.ink,
-          color: palette.ink,
-        }}
+        className="pointer-events-auto absolute top-1/2 z-20 -translate-y-1/2 rounded-l-md border border-r-0 border-border bg-card/95 p-1.5 text-foreground shadow-sm backdrop-blur-md hover:bg-accent hover:text-accent-foreground"
+        style={{ right: 0, transform: "translate(0, -50%)" }}
       >
         {open ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
       </button>
 
       <aside
         aria-label="Container inspector"
-        className="pointer-events-auto absolute right-0 top-0 z-10 flex h-full flex-col border-l shadow-lg backdrop-blur-md transition-transform"
-        style={{
-          width: 360,
-          backgroundColor: `${palette.bone}f0`,
-          borderColor: palette.ink,
-          color: palette.ink,
-          transform: open ? "translateX(0)" : "translateX(100%)",
-        }}
+        className={cn(
+          "pointer-events-auto flex h-full flex-col overflow-hidden border-l border-border bg-card/95 text-foreground shadow-lg backdrop-blur-md transition-[width]",
+        )}
+        style={{ width: open ? INSPECTOR_OPEN_WIDTH : 0 }}
       >
         {selectedIssueId ? (
-          /* E4: embedded issue read view. Replaces the drawer body. */
           <IssueQuickLook
             id={selectedIssueId}
             companyId={companyId}
@@ -201,30 +158,23 @@ export function ContainerInspector({
         ) : (
           <>
             {/* Header */}
-            <div
-              className="flex items-center gap-2 border-b px-3 py-2.5"
-              style={{ borderColor: `${palette.ink}33` }}
-            >
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
               <span
                 aria-hidden
-                className="inline-block h-2 w-2 rounded-full"
                 title={`Live status: ${liveStatus}`}
-                style={{
-                  backgroundColor:
-                    liveStatus === "running" ? palette.accent : palette.dustBlue,
-                  boxShadow:
-                    liveStatus === "running"
-                      ? `0 0 6px ${palette.accent}`
-                      : undefined,
-                }}
+                className={cn(
+                  "inline-block h-2 w-2 shrink-0 rounded-full",
+                  liveStatus === "running"
+                    ? "bg-emerald-400 shadow-[0_0_6px_theme(colors.emerald.400)] animate-pulse"
+                    : "bg-muted-foreground/40",
+                )}
               />
               <span className="truncate text-sm font-semibold">{displayName}</span>
               <span
-                className={`ml-auto shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide ${
-                  selfLayer === "campus-root"
-                    ? LAYER_PILL_CLASS.campus
-                    : LAYER_PILL_CLASS[selfLayer]
-                }`}
+                className={cn(
+                  "ml-auto shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide",
+                  layerPillClass(selfLayer),
+                )}
               >
                 {selfLayer === "campus-root" ? "campus" : selfLayer}
               </span>
@@ -273,7 +223,6 @@ export function ContainerInspector({
                     </Section>
                   )}
 
-                  {/* E3: per-child delegate + self-assign. */}
                   <DelegateSection
                     agentId={agentId}
                     selfLayer={selfLayer}
@@ -284,7 +233,6 @@ export function ContainerInspector({
               )}
             </div>
 
-            {/* Footer — Hire + Wrap-in controls. */}
             {(hireOptions.length > 0 || wrapInLayer) && (
               <FooterActions
                 companyId={companyId}
@@ -312,14 +260,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      className="border-b"
-      style={{ borderColor: `${palette.ink}1a` }}
-    >
-      <div
-        className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wide"
-        style={{ color: palette.deepBlue }}
-      >
+    <div className="border-b border-border/60">
+      <div className="px-4 pb-1.5 pt-3.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </div>
       <div>{children}</div>
@@ -329,7 +271,7 @@ function Section({
 
 function EmptyRow({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-3 pb-3 text-xs italic" style={{ color: `${palette.ink}99` }}>
+    <div className="px-4 pb-3 text-xs italic text-muted-foreground">
       {children}
     </div>
   );
@@ -337,15 +279,8 @@ function EmptyRow({ children }: { children: React.ReactNode }) {
 
 function SpinnerRow() {
   return (
-    <div
-      className="flex items-center gap-2 px-3 pb-3 text-xs"
-      style={{ color: `${palette.ink}99` }}
-    >
-      <span
-        aria-hidden
-        className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-t-transparent"
-        style={{ borderColor: `${palette.deepBlue} transparent ${palette.deepBlue} ${palette.deepBlue}` }}
-      />
+    <div className="flex items-center gap-2 px-4 pb-3 text-xs text-muted-foreground">
+      <Loader2 size={12} className="animate-spin" />
       loading…
     </div>
   );
@@ -359,14 +294,11 @@ function IssueList({
   onSelect: (id: string) => void;
 }) {
   return (
-    <div className="px-1 pb-2">
+    <div className="px-2 pb-2">
       {issues.map((issue) => (
         <div
           key={issue.id}
-          /* E4: intercept IssueRow's <Link> so the click swaps the drawer
-             body to IssueQuickLook instead of navigating away. */
           onClickCapture={(e) => {
-            // Don't hijack modifier-clicks (open-in-new-tab etc).
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
             e.preventDefault();
             e.stopPropagation();
@@ -401,7 +333,7 @@ function LeafAgentBody({
     <>
       <Section title="Runtime">
         {runtime ? (
-          <div className="space-y-0.5 px-3 pb-3 font-mono text-[11px]" style={{ color: palette.ink }}>
+          <div className="space-y-0.5 px-4 pb-3 font-mono text-[11px] text-foreground/90">
             <div>endpoint: {runtime.endpoint}</div>
             <div>port: {runtime.port}</div>
             {aliasEmail && <div>identity: {aliasEmail}</div>}
@@ -420,26 +352,21 @@ function LeafAgentBody({
         )}
       </Section>
       <Section title="New task">
-        <div className="px-3 pb-3">
-          {/* E3: strict delegation guard — leaves have no children, so there
-              are no "+ Delegate" buttons. A human/admin may inject a task
-              directly to this leaf via "+ Receive new task". */}
-          <button
+        <div className="px-4 pb-3">
+          <Button
             type="button"
+            variant="outline"
+            size="xs"
             disabled={!agentId}
-            className="w-full rounded-md border px-2 py-1.5 text-left text-xs font-medium disabled:opacity-50"
+            className="w-full justify-start"
             onClick={() => {
               if (!agentId) return;
               openNewIssue({ assigneeAgentId: agentId });
             }}
-            style={{
-              borderColor: palette.ink,
-              backgroundColor: palette.cream,
-              color: palette.ink,
-            }}
           >
-            + Receive new task
-          </button>
+            <Plus size={12} />
+            Receive new task
+          </Button>
         </div>
       </Section>
       <Section title="Live transcript">
@@ -463,36 +390,29 @@ function DelegateSection({
   currentReceivedTask: Issue | null;
 }) {
   const { openNewIssue } = useDialog();
-
-  // A top-level work item targeted at this container makes sense whenever
-  // there's a real container agent to receive it. Campus-root has no agent
-  // id to assign to, so we skip the self-assign button there.
   const canSelfAssign = agentId !== null;
 
   return (
     <Section title="Delegate">
-      <div className="flex flex-col gap-1.5 px-3 pb-3">
+      <div className="flex flex-col gap-1.5 px-4 pb-3">
         {childAgents.length === 0 ? (
-          <div className="text-[11px] italic" style={{ color: `${palette.ink}88` }}>
+          <div className="text-[11px] italic text-muted-foreground">
             No direct children yet — delegation requires a report.
           </div>
         ) : (
           childAgents.map((child) => (
-            <button
+            <Button
               key={child.id}
               type="button"
-              className="w-full rounded-md border px-2 py-1.5 text-left text-xs font-medium"
+              variant="outline"
+              size="xs"
+              className="w-full justify-start"
               onClick={() =>
                 openNewIssue({
                   assigneeAgentId: child.id,
                   parentId: currentReceivedTask?.id,
                 })
               }
-              style={{
-                borderColor: palette.ink,
-                backgroundColor: palette.cream,
-                color: palette.ink,
-              }}
               title={
                 currentReceivedTask
                   ? `Lineage: parent = ${
@@ -502,27 +422,26 @@ function DelegateSection({
                   : undefined
               }
             >
-              + Delegate to {child.name}
-            </button>
+              <Plus size={12} />
+              Delegate to {child.name}
+            </Button>
           ))
         )}
         {canSelfAssign && (
-          <button
+          <Button
             type="button"
-            className="w-full rounded-md border px-2 py-1.5 text-left text-xs"
+            variant="ghost"
+            size="xs"
+            className="w-full justify-start"
             onClick={() =>
               openNewIssue({
                 assigneeAgentId: agentId ?? undefined,
               })
             }
-            style={{
-              borderColor: `${palette.ink}55`,
-              backgroundColor: palette.bone,
-              color: palette.ink,
-            }}
           >
-            + New task for this {selfLayer === "campus-root" ? "campus" : selfLayer}
-          </button>
+            <Plus size={12} />
+            New task for this {selfLayer === "campus-root" ? "campus" : selfLayer}
+          </Button>
         )}
       </div>
     </Section>
@@ -548,16 +467,10 @@ function FooterActions({
 }) {
   const [activeLayer, setActiveLayer] = useState<ZootropolisLayer | null>(null);
   return (
-    <div
-      className="border-t px-3 py-2.5"
-      style={{ borderColor: `${palette.ink}33` }}
-    >
+    <div className="border-t border-border px-4 py-3">
       {hireOptions.length > 0 && (
         <>
-          <div
-            className="pb-1.5 text-[10px] font-semibold uppercase tracking-wide"
-            style={{ color: palette.deepBlue }}
-          >
+          <div className="pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             Hire
           </div>
           <div className="flex flex-col gap-1.5">
@@ -572,18 +485,16 @@ function FooterActions({
                     onCreated={() => setActiveLayer(null)}
                   />
                 ) : (
-                  <button
+                  <Button
                     type="button"
-                    className="w-full rounded-md border px-2 py-1.5 text-left text-xs font-medium transition-colors"
+                    variant="outline"
+                    size="xs"
+                    className="w-full justify-start"
                     onClick={() => setActiveLayer(opt.layer)}
-                    style={{
-                      borderColor: palette.ink,
-                      backgroundColor: palette.cream,
-                      color: palette.ink,
-                    }}
                   >
+                    <Plus size={12} />
                     {opt.label}
-                  </button>
+                  </Button>
                 )}
               </div>
             ))}
@@ -593,10 +504,7 @@ function FooterActions({
 
       {wrapInLayer && self && selfLayer !== "campus-root" && (
         <div className={hireOptions.length > 0 ? "mt-3" : ""}>
-          <div
-            className="pb-1.5 text-[10px] font-semibold uppercase tracking-wide"
-            style={{ color: palette.deepBlue }}
-          >
+          <div className="pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             Promote
           </div>
           <div className="flex flex-col gap-1.5">
@@ -642,9 +550,26 @@ function WrapInButton({
     setSubmitting(true);
     setError(null);
 
-    // Step 1: POST the new container, taking self's old parent.
     const adapterType = wrapInLayer === "agent" ? "aliaskit_vm" : "claude_local";
     const role = wrapInLayer === "agent" ? "engineer" : "general";
+
+    // Phase T polish: the wrapped agent's stored position belongs to
+    // the OLD hierarchy level (campus hex / floor row / etc). The new
+    // container is taking that same logical slot, so inherit the pos
+    // and drop it from the wrapped agent's metadata — otherwise the
+    // new container falls back to spiral order and collides with a
+    // sibling, while the wrapped agent retains a meaningless hex pos
+    // it no longer applies to.
+    const wrappedPos = readZootropolisPos(self.metadata);
+    const inheritablePos =
+      wrappedPos &&
+      ((wrapInLayer === "room" || wrapInLayer === "floor" || wrapInLayer === "building") &&
+        (wrappedPos.kind === "hex" ||
+          wrappedPos.kind === "rowSlot" ||
+          wrappedPos.kind === "floorRank"))
+        ? wrappedPos
+        : null;
+
     const body: Record<string, unknown> = {
       name: trimmed,
       role,
@@ -658,24 +583,27 @@ function WrapInButton({
         zootropolis: {
           layer: wrapInLayer,
           displayName: trimmed,
+          ...(inheritablePos ? { pos: inheritablePos } : {}),
         },
       },
     };
 
     try {
       const created = await agentsApi.create(companyId, body);
-
-      // Step 2: PATCH self to reparent under the new container. Best-effort
-      // rollback if this fails — log and surface the error, but we can't
-      // un-create the new container without a delete endpoint in the mix,
-      // so a successful POST + failed PATCH leaves an orphan parent the
-      // user can either delete manually or re-use by adopting children.
+      // Compose the wrapped-agent patch: re-parent + strip the now-
+      // meaningless `pos` so it gets a fresh default in its new
+      // container's coordinate system.
+      const wrappedExistingMeta =
+        (self.metadata as Record<string, unknown> | null) ?? {};
+      const wrappedExistingZ =
+        (wrappedExistingMeta.zootropolis as Record<string, unknown> | undefined) ?? {};
+      const { pos: _strippedPos, ...restZ } = wrappedExistingZ;
+      const wrappedPatch: Record<string, unknown> = {
+        reportsTo: created.id,
+        metadata: { ...wrappedExistingMeta, zootropolis: restZ },
+      };
       try {
-        await agentsApi.update(
-          self.id,
-          { reportsTo: created.id },
-          companyId,
-        );
+        await agentsApi.update(self.id, wrappedPatch, companyId);
       } catch (patchErr) {
         console.error(
           "[ContainerInspector] wrap-in: PATCH reportsTo failed; new container left in place",
@@ -688,10 +616,6 @@ function WrapInButton({
         queryKey: queryKeys.agents.list(companyId),
       });
 
-      // Navigate into the new container. For campus-layer wraps, the campus
-      // root is the canvas itself (no /campus/<id> route), so we land on
-      // the campus view which will now include the freshly wrapped
-      // building. For every other layer we route into the new container.
       const route = routeForLayer(wrapInLayer);
       if (route) {
         navigate(`/campus/${companyId}/${route}/${created.id}`);
@@ -709,76 +633,65 @@ function WrapInButton({
 
   if (!open) {
     return (
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="xs"
+        className="w-full justify-start"
         onClick={() => setOpen(true)}
-        className="w-full rounded-md border px-2 py-1.5 text-left text-xs font-medium"
-        style={{
-          borderColor: palette.ink,
-          backgroundColor: palette.cream,
-          color: palette.ink,
-        }}
       >
-        + Wrap me in a {wrapInLayer === "campus" ? "campus root" : wrapInLayer}
-      </button>
+        <Plus size={12} />
+        Wrap me in a {wrapInLayer === "campus" ? "campus root" : wrapInLayer}
+      </Button>
     );
   }
 
   return (
     <form
       onSubmit={submit}
-      className="flex flex-col gap-1.5 rounded-md border p-2"
-      style={{ borderColor: palette.ink, backgroundColor: palette.cream }}
+      className="flex flex-col gap-1.5 rounded-md border border-border bg-popover p-2"
     >
-      <input
+      <Input
         type="text"
         autoFocus
         placeholder={`${wrapInLayer} name`}
         value={name}
         onChange={(e) => setName(e.target.value)}
         disabled={submitting}
-        className="w-full rounded border px-2 py-1 text-xs outline-none"
-        style={{
-          borderColor: `${palette.ink}55`,
-          backgroundColor: palette.bone,
-          color: palette.ink,
-        }}
+        className="h-7 text-xs"
       />
       {error && (
-        <div className="text-[10px]" style={{ color: palette.clay }}>
-          {error}
-        </div>
+        <div className="text-[10px] text-destructive">{error}</div>
       )}
       <div className="flex items-center gap-1.5">
-        <button
+        <Button
           type="submit"
+          variant="default"
+          size="xs"
           disabled={submitting || name.trim().length === 0}
-          className="rounded border px-2 py-1 text-xs font-medium disabled:opacity-50"
-          style={{
-            borderColor: palette.ink,
-            backgroundColor: palette.accent,
-            color: palette.ink,
-          }}
         >
-          {submitting ? "Wrapping…" : "Wrap"}
-        </button>
-        <button
+          {submitting ? (
+            <>
+              <Loader2 size={10} className="animate-spin" />
+              Wrapping…
+            </>
+          ) : (
+            "Wrap"
+          )}
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={() => {
             setOpen(false);
             setName("");
             setError(null);
           }}
           disabled={submitting}
-          className="rounded border px-2 py-1 text-xs"
-          style={{
-            borderColor: `${palette.ink}55`,
-            backgroundColor: palette.bone,
-            color: palette.ink,
-          }}
         >
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -796,6 +709,7 @@ export function HireForm({
   onCancel,
   onCreated,
   submitLabel = "Create",
+  initialPos,
 }: {
   companyId: string;
   parentAgentId: string | null;
@@ -803,6 +717,12 @@ export function HireForm({
   onCancel?: () => void;
   onCreated?: () => void;
   submitLabel?: string;
+  /**
+   * Phase T3 — optional pre-filled spatial position. Bakes into the
+   * new agent's `metadata.zootropolis.pos` so click-to-hire on an
+   * empty hex slot lands the agent on exactly that hex.
+   */
+  initialPos?: import("@paperclipai/shared").ZootropolisPos;
 }) {
   const [name, setName] = useState("");
   const [endpoint, setEndpoint] = useState("");
@@ -810,10 +730,6 @@ export function HireForm({
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  // Phase I1/I2: aliaskit_vm (leaf) hires require a WebSocket endpoint —
-  // Paperclip never auto-spawns a daemon, so the operator tells us where
-  // their runtime is listening. Container-layer hires (claude_local) don't
-  // need an endpoint.
   const needsEndpoint = layer === "agent";
   const endpointTrim = endpoint.trim();
   const endpointValid =
@@ -854,6 +770,7 @@ export function HireForm({
           zootropolis: {
             layer,
             displayName: trimmed,
+            ...(initialPos ? { pos: initialPos } : {}),
           },
         },
       };
@@ -874,82 +791,66 @@ export function HireForm({
   return (
     <form
       onSubmit={submit}
-      className="flex flex-col gap-1.5 rounded-md border p-2"
-      style={{ borderColor: palette.ink, backgroundColor: palette.cream }}
+      className="flex flex-col gap-1.5 rounded-md border border-border bg-popover p-2"
     >
-      <input
+      <Input
         type="text"
         autoFocus
         placeholder={`${layer} name`}
         value={name}
         onChange={(e) => setName(e.target.value)}
         disabled={submitting}
-        className="w-full rounded border px-2 py-1 text-xs outline-none"
-        style={{
-          borderColor: `${palette.ink}55`,
-          backgroundColor: palette.bone,
-          color: palette.ink,
-        }}
+        className="h-7 text-xs"
       />
       {needsEndpoint && (
         <>
-          <input
+          <Input
             type="text"
             placeholder="ws://your-host:7100/"
             value={endpoint}
             onChange={(e) => setEndpoint(e.target.value)}
             disabled={submitting}
-            className="w-full rounded border px-2 py-1 text-xs outline-none font-mono"
-            style={{
-              borderColor:
-                endpointTrim.length > 0 && !endpointValid
-                  ? palette.clay
-                  : `${palette.ink}55`,
-              backgroundColor: palette.bone,
-              color: palette.ink,
-            }}
+            aria-invalid={endpointTrim.length > 0 && !endpointValid}
+            className="h-7 font-mono text-xs"
           />
-          <div className="text-[10px] italic" style={{ color: `${palette.ink}88` }}>
+          <div className="text-[10px] italic text-muted-foreground">
             Agent daemon WebSocket URL. See <code>docs/external-daemon-quickstart.md</code>.
           </div>
         </>
       )}
       {error && (
-        <div className="text-[10px]" style={{ color: palette.clay }}>
-          {error}
-        </div>
+        <div className="text-[10px] text-destructive">{error}</div>
       )}
       <div className="flex items-center gap-1.5">
-        <button
+        <Button
           type="submit"
+          variant="default"
+          size="xs"
           disabled={
             submitting ||
             name.trim().length === 0 ||
             (needsEndpoint && (endpointTrim.length === 0 || !endpointValid))
           }
-          className="rounded border px-2 py-1 text-xs font-medium disabled:opacity-50"
-          style={{
-            borderColor: palette.ink,
-            backgroundColor: palette.accent,
-            color: palette.ink,
-          }}
         >
-          {submitting ? "Creating…" : submitLabel}
-        </button>
+          {submitting ? (
+            <>
+              <Loader2 size={10} className="animate-spin" />
+              Creating…
+            </>
+          ) : (
+            submitLabel
+          )}
+        </Button>
         {onCancel && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="xs"
             onClick={onCancel}
             disabled={submitting}
-            className="rounded border px-2 py-1 text-xs"
-            style={{
-              borderColor: `${palette.ink}55`,
-              backgroundColor: palette.bone,
-              color: palette.ink,
-            }}
           >
             Cancel
-          </button>
+          </Button>
         )}
       </div>
     </form>

@@ -20,6 +20,23 @@ import { PluginLauncherProvider } from "./plugins/launchers";
 import "@mdxeditor/editor/style.css";
 import "./index.css";
 
+// Suppress a benign troika-three-text warning that fires repeatedly
+// for every drei <Text> instance ("unsupported GSUB table LookupType
+// 6 format 1"). The OpenType feature isn't supported by the SDF
+// parser but the text still renders correctly — we just drop the
+// noise so the console stays usable.
+const __origConsoleWarn = console.warn;
+console.warn = (...args: unknown[]) => {
+  const first = args[0];
+  if (
+    typeof first === "string" &&
+    first.includes("unsupported GSUB table LookupType")
+  ) {
+    return;
+  }
+  __origConsoleWarn(...args);
+};
+
 initPluginBridge(React, ReactDOM);
 
 if ("serviceWorker" in navigator) {

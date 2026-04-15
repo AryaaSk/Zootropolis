@@ -47,6 +47,27 @@ function animalUrl(name: AnimalName): string {
   return `/assets/zootropolis/animals/${name}.glb`;
 }
 
+/**
+ * Per-animal render tweaks — some GLBs ship with Z-up baked in (or a
+ * root rotation that reads as "lying down" in our Y-up scene), and
+ * some need a bigger base scale so they don't read as toys on the
+ * bigger hex tiles. Values tuned by eye. Defaults at the bottom apply
+ * when the map has no entry.
+ */
+// Quaternius low-poly animals ship with a baked rotation that makes
+// them lie on their side in a Y-up scene. Turning +PI/2 around X puts
+// their spine vertical and snout forward (toward +Z) — that's the
+// orientation we want. Owl already ships Y-up so leaves it alone.
+const ANIMAL_ROTATION: Partial<Record<AnimalName, [number, number, number]>> = {};
+
+// Per-species base scale for the DEFAULT (small) variant. These were
+// tuned for the campus/room/floor viewports where the animal sits on
+// a hex tile alongside buildings. AgentView uses size="large" which
+// multiplies these by ~2× for the isolated leaf view.
+const ANIMAL_SCALE: Partial<Record<AnimalName, number>> = {};
+const DEFAULT_ANIMAL_SCALE = 0.8;
+const LARGE_ANIMAL_MULTIPLIER = 1.25;
+
 // Cheap FNV-ish hash on the agent id so unmapped roles still pick a
 // stable species per agent. Intentionally the same shape as the bob
 // phase hash in Animal.tsx — no reason to diverge.
@@ -78,6 +99,12 @@ for (const a of ANIMALS) {
 interface AnimalModelProps {
   role?: string;
   agentId?: string;
+  /**
+   * Visual size tier. `default` is tuned for tiles on the hex grid
+   * (campus / floor / room). `large` is used by AgentView where the
+   * single leaf is centered on its own canvas.
+   */
+  size?: "default" | "large";
   color: string;
 }
 
@@ -104,20 +131,24 @@ function CubeFallback({ color }: { color: string }) {
   );
 }
 
-function TintedGLB({ url, color }: { url: string; color: string }) {
+function TintedGLB({
+  url,
+  color,
+  name,
+  size = "default",
+}: {
+  url: string;
+  color: string;
+  name: AnimalName;
+  size?: "default" | "large";
+}) {
   const { scene } = useGLTF(url) as { scene: Object3D };
 
-  // Clone + retint on every color change. The clone is cheap (shared
-  // geometry) and lets multiple agents reuse the same GLB with
-  // different palette colors. Re-tint only when color changes.
   const cloned = useMemo(() => {
     const copy = scene.clone(true);
     copy.traverse((obj: Object3D) => {
       const mesh = obj as Mesh;
       if ((mesh as Mesh).isMesh) {
-        // Replace whatever material the GLB shipped with by a simple
-        // Lambert tinted to the palette color. Matches the cube
-        // animal's shading model so lighting feels consistent.
         mesh.material = new MeshLambertMaterial({ color });
         mesh.castShadow = false;
         mesh.receiveShadow = false;
@@ -126,10 +157,12 @@ function TintedGLB({ url, color }: { url: string; color: string }) {
     return copy;
   }, [scene, color]);
 
-  // Scale tuned so the GLB roughly fills the same ~1-unit silhouette as
-  // the old cube body. Quaternius / Kenney source models hover around
-  // 1-2 units tall; 0.8 lands close to the cube body's visual mass.
-  return <primitive object={cloned} scale={0.8} position={[0, 0, 0]} />;
+  const rotation = ANIMAL_ROTATION[name] ?? [0, 0, 0];
+  const baseScale = ANIMAL_SCALE[name] ?? DEFAULT_ANIMAL_SCALE;
+  const scale = size === "large" ? baseScale * LARGE_ANIMAL_MULTIPLIER : baseScale;
+  return (
+    <primitive object={cloned} scale={scale} rotation={rotation} position={[0, 0, 0]} />
+  );
 }
 
 /**
@@ -138,12 +171,12 @@ function TintedGLB({ url, color }: { url: string; color: string }) {
  * idle bob + pulse animations have something to apply to even while
  * the GLB is still resolving.
  */
-export function AnimalModel({ role, agentId, color }: AnimalModelProps) {
+export function AnimalModel({ role, agentId, color, size = "default" }: AnimalModelProps) {
   const name = pickAnimal(role, agentId);
   const url = animalUrl(name);
   return (
     <Suspense fallback={<CubeFallback color={color} />}>
-      <TintedGLB url={url} color={color} />
+      <TintedGLB url={url} color={color} name={name} size={size} />
     </Suspense>
   );
 }

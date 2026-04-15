@@ -48,6 +48,21 @@ import { RoomView } from "./pages/campus/views/RoomView";
 import { FloorView } from "./pages/campus/views/FloorView";
 import { BuildingView } from "./pages/campus/views/BuildingView";
 import { CampusView } from "./pages/campus/views/CampusView";
+import { TimeOfDayProvider } from "./pages/campus/lib/time-of-day";
+
+/**
+ * CampusRouteLayout — wraps all `/campus/:companyId/*` routes in the
+ * Phase S1.5 TimeOfDayProvider so the environment preset + lights + the
+ * slider-in-overlay share one source of truth. Override persists across
+ * navigation within the campus routes.
+ */
+function CampusRouteLayout() {
+  return (
+    <TimeOfDayProvider>
+      <Outlet />
+    </TimeOfDayProvider>
+  );
+}
 import { NewAgent } from "./pages/NewAgent";
 import { AuthPage } from "./pages/Auth";
 import { BoardClaimPage } from "./pages/BoardClaim";
@@ -364,7 +379,7 @@ export function App() {
           <Route path="execution-workspaces/:workspaceId/issues" element={<UnprefixedBoardRedirect />} />
           <Route path="tests/ux/chat" element={<UnprefixedBoardRedirect />} />
           <Route path="tests/ux/runs" element={<UnprefixedBoardRedirect />} />
-          <Route path="campus/:companyId">
+          <Route path="campus/:companyId" element={<CampusRouteLayout />}>
             <Route index element={<CampusView />} />
             <Route path="building/:id" element={<BuildingView />} />
             <Route path="floor/:id" element={<FloorView />} />

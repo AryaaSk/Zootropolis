@@ -6,14 +6,10 @@ import {
   type Agent,
   type ZootropolisLayer,
 } from "@paperclipai/shared";
+import { cn } from "@/lib/utils";
 import { agentsApi } from "../../../api/agents";
 import { queryKeys } from "../../../lib/queryKeys";
-import { palette } from "../palette";
 
-/**
- * Top-down ordering used in the minimap (widest container at top, leaf at
- * bottom — matches the visual metaphor of zooming in).
- */
 const LAYER_STACK: readonly ZootropolisLayer[] = [
   "campus",
   "building",
@@ -31,10 +27,11 @@ function inferLayerFromPath(pathname: string): ZootropolisLayer | null {
 }
 
 /**
- * Minimap — 5-layer stack in a corner. A highlighted row marks the current
- * zoom level; clicking any layer above the current one jumps straight to
- * that ancestor (skipping intermediate hops). Clicking a layer below the
- * current depth is a no-op because we don't know which child to enter.
+ * Minimap — 5-layer zoom stack in the top-right corner. The current depth
+ * is highlighted; ancestor layers are clickable jump targets.
+ *
+ * Phase U: dark glass treatment, semantic tokens, primary-tinted "current"
+ * pill instead of palette.accent.
  */
 export function Minimap() {
   const navigate = useNavigate();
@@ -49,8 +46,6 @@ export function Minimap() {
 
   const currentLayer = inferLayerFromPath(location.pathname) ?? "campus";
 
-  // Map each ancestor layer → the href to jump to it. Built by walking up
-  // reportsTo from the current agent.
   const ancestorHrefs = useMemo<Partial<Record<ZootropolisLayer, string>>>(() => {
     const out: Partial<Record<ZootropolisLayer, string>> = {};
     if (!companyId) return out;
@@ -77,16 +72,9 @@ export function Minimap() {
   return (
     <aside
       aria-label="Campus zoom minimap"
-      className="pointer-events-auto absolute right-4 top-4 z-10 flex w-[96px] flex-col gap-1 rounded-md border p-2 shadow-sm backdrop-blur-md"
-      style={{
-        backgroundColor: `${palette.bone}d9`,
-        borderColor: palette.ink,
-      }}
+      className="pointer-events-auto absolute right-4 top-4 z-10 flex w-[112px] flex-col gap-0.5 rounded-md border border-border bg-card/95 p-2 text-foreground shadow-sm backdrop-blur-md"
     >
-      <div
-        className="px-1 text-[10px] font-semibold uppercase tracking-wide"
-        style={{ color: palette.deepBlue }}
-      >
+      <div className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
         Zoom
       </div>
       {LAYER_STACK.map((layer) => {
@@ -101,17 +89,14 @@ export function Minimap() {
             onClick={() => {
               if (canJump && href) navigate(href);
             }}
-            className="flex items-center justify-between rounded px-2 py-1 text-[11px] capitalize transition-colors disabled:cursor-default"
-            style={{
-              backgroundColor: isCurrent ? palette.accent : "transparent",
-              color: isCurrent
-                ? palette.ink
+            className={cn(
+              "flex items-center justify-between rounded-md px-2 py-1 text-[11px] capitalize transition-colors disabled:cursor-default",
+              isCurrent
+                ? "bg-primary text-primary-foreground"
                 : canJump
-                  ? palette.deepBlue
-                  : palette.dustBlue,
-              cursor: canJump ? "pointer" : "default",
-              opacity: !canJump && !isCurrent ? 0.5 : 1,
-            }}
+                  ? "text-foreground hover:bg-accent hover:text-accent-foreground"
+                  : "text-muted-foreground/50",
+            )}
             title={
               isCurrent
                 ? `Current: ${layer}`
@@ -123,11 +108,14 @@ export function Minimap() {
             <span>{layer}</span>
             <span
               aria-hidden
-              className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{
-                backgroundColor: isCurrent ? palette.ink : palette.dustBlue,
-                opacity: isCurrent ? 1 : canJump ? 0.6 : 0.25,
-              }}
+              className={cn(
+                "inline-block h-1.5 w-1.5 rounded-full",
+                isCurrent
+                  ? "bg-primary-foreground"
+                  : canJump
+                    ? "bg-muted-foreground/60"
+                    : "bg-muted-foreground/20",
+              )}
             />
           </button>
         );

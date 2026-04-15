@@ -1,14 +1,15 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { useNavigate } from "@/lib/router";
 import {
   readZootropolisLayer,
   type Agent,
   type ZootropolisLayer,
 } from "@paperclipai/shared";
+import { Button } from "@/components/ui/button";
 import { agentsApi } from "../../../api/agents";
 import { queryKeys } from "../../../lib/queryKeys";
-import { palette } from "../palette";
 
 /** Route segment for a given container layer (keep in sync with ContainerInspector). */
 function routeForLayer(layer: ZootropolisLayer): string | null {
@@ -20,7 +21,7 @@ function routeForLayer(layer: ZootropolisLayer): string | null {
     case "building":
       return "building";
     case "campus":
-      return null; // the campus root IS the canvas
+      return null;
     case "agent":
       return "agent";
     default:
@@ -31,17 +32,14 @@ function routeForLayer(layer: ZootropolisLayer): string | null {
 interface AddToExistingButtonProps {
   companyId: string;
   self: Agent;
-  /** The parent layer — agents at this layer are the candidates. */
   parentLayer: ZootropolisLayer;
 }
 
 /**
- * Phase I3 — "+ Add to existing <parent-layer>" button.
+ * Phase I3 — "+ Add to existing <parent-layer>" button. Pairs with the
+ * WrapInButton (creates a NEW parent); this one joins EXISTING structure.
  *
- * Clicks open a small popover listing every agent in the company whose
- * metadata.zootropolis.layer matches `parentLayer`. Picking one PATCHes
- * self's reportsTo to that target. Pairs with WrapInButton (creates a
- * NEW parent); this one joins EXISTING structure.
+ * Phase U: shadcn Buttons + semantic tokens.
  */
 export function AddToExistingButton({
   companyId,
@@ -63,7 +61,7 @@ export function AddToExistingButton({
     const list = (agents as Agent[] | undefined) ?? [];
     return list
       .filter((a) => a.id !== self.id && readZootropolisLayer(a.metadata) === parentLayer)
-      .filter((a) => a.id !== self.reportsTo) // hide current parent
+      .filter((a) => a.id !== self.reportsTo)
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [agents, self.id, self.reportsTo, parentLayer]);
 
@@ -77,8 +75,6 @@ export function AddToExistingButton({
       await queryClient.invalidateQueries({
         queryKey: queryKeys.agents.list(companyId),
       });
-      // Navigate into the new parent so the user lands where their agent
-      // now lives. For campus-layer parents, the canvas is the root.
       const route = routeForLayer(parentLayer);
       if (route) {
         navigate(`/campus/${companyId}/${route}/${target.id}`);
@@ -95,8 +91,11 @@ export function AddToExistingButton({
 
   if (!open) {
     return (
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="xs"
+        className="w-full justify-start"
         onClick={() => setOpen(true)}
         disabled={disabled}
         title={
@@ -104,72 +103,50 @@ export function AddToExistingButton({
             ? `No ${parentLayer} exists yet — wrap in a new one first.`
             : undefined
         }
-        className="w-full rounded-md border px-2 py-1.5 text-left text-xs font-medium disabled:opacity-40"
-        style={{
-          borderColor: palette.ink,
-          backgroundColor: palette.bone,
-          color: palette.ink,
-        }}
       >
-        + Add to existing {parentLayer}
-      </button>
+        <Plus size={12} />
+        Add to existing {parentLayer}
+      </Button>
     );
   }
 
   return (
-    <div
-      className="flex flex-col gap-1.5 rounded-md border p-2"
-      style={{ borderColor: palette.ink, backgroundColor: palette.cream }}
-    >
-      <div
-        className="text-[10px] font-semibold uppercase tracking-wide"
-        style={{ color: palette.deepBlue }}
-      >
+    <div className="flex flex-col gap-1.5 rounded-md border border-border bg-popover p-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
         Add to which {parentLayer}?
       </div>
       <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
         {candidates.length === 0 ? (
-          <div className="text-[11px] italic" style={{ color: `${palette.ink}88` }}>
+          <div className="text-[11px] italic text-muted-foreground">
             No existing {parentLayer}s to add to.
           </div>
         ) : (
           candidates.map((c) => (
-            <button
+            <Button
               key={c.id}
               type="button"
+              variant="ghost"
+              size="xs"
+              className="w-full justify-start"
               onClick={() => onPick(c)}
               disabled={submitting}
-              className="w-full rounded border px-2 py-1 text-left text-xs disabled:opacity-50"
-              style={{
-                borderColor: `${palette.ink}55`,
-                backgroundColor: palette.bone,
-                color: palette.ink,
-              }}
             >
               {c.name}
-            </button>
+            </Button>
           ))
         )}
       </div>
-      {error && (
-        <div className="text-[10px]" style={{ color: palette.clay }}>
-          {error}
-        </div>
-      )}
+      {error && <div className="text-[10px] text-destructive">{error}</div>}
       <div className="flex items-center gap-1.5">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={() => setOpen(false)}
           disabled={submitting}
-          className="rounded border px-2 py-1 text-xs"
-          style={{
-            borderColor: `${palette.ink}55`,
-            backgroundColor: palette.bone,
-            color: palette.ink,
-          }}
         >
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );

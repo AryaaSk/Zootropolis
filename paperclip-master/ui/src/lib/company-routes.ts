@@ -18,7 +18,14 @@ const BOARD_ROUTE_ROOTS = new Set([
   "design-guide",
 ]);
 
-const GLOBAL_ROUTE_ROOTS = new Set(["auth", "invite", "board-claim", "cli-auth", "docs", "instance"]);
+// Zootropolis 3D campus pages live at /campus/:companyId/... — they carry
+// their own companyId in the URL rather than using the /:companyPrefix
+// scheme. They go in GLOBAL not BOARD: BOARD entries get the company prefix
+// prepended by applyCompanyPrefix (turning /campus/abc → /Z00/campus/abc,
+// which doesn't exist), but GLOBAL entries are left alone. Including
+// "campus" here also makes extractCompanyPrefixFromPath skip it, so links
+// rendered inside the campus tree don't read "campus" as a company prefix.
+const GLOBAL_ROUTE_ROOTS = new Set(["auth", "invite", "board-claim", "cli-auth", "docs", "instance", "campus"]);
 
 export function normalizeCompanyPrefix(prefix: string): string {
   return prefix.trim().toUpperCase();

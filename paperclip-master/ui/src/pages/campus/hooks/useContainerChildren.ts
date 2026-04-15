@@ -84,12 +84,14 @@ export function useContainerChildren(
     const selfLayer = readZootropolisLayer(self?.metadata);
     const wantedChildLayer = nextLayerDown(selfLayer);
     let children = reports;
-    if (wantedChildLayer) {
+    // Campus is a mixed canvas — it can hold agents, rooms, floors,
+    // buildings side-by-side. Don't filter by layer there. For every
+    // other container we still restrict to the expected next layer so
+    // a building view shows floors (not stray leaves), etc.
+    if (wantedChildLayer && selfLayer !== "campus") {
       const filtered = reports.filter(
         (a) => readZootropolisLayer(a.metadata) === wantedChildLayer,
       );
-      // Defensive fallback: if metadata is missing on the children, just
-      // include all reports rather than render an empty container.
       if (filtered.length > 0) children = filtered;
     }
 

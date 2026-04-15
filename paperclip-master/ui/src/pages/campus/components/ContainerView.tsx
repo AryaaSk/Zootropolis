@@ -1,5 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import { Edges, Text } from "@react-three/drei";
+import { useLabelColor } from "../lib/label-color";
 import { useFrame } from "@react-three/fiber";
 import { Color, type Group } from "three";
 import { palette } from "../palette";
@@ -75,6 +76,7 @@ function GlowHalo({
 // Room shell: 4 low walls + floor plane. Inside dims ~6x6 so ~4 animals fit
 // comfortably on a grid along x.
 function RoomShell({ name, active }: { name: string; active: boolean }) {
+  const labelColor = useLabelColor();
   const inner = 6; // inner floor side
   const wallH = 0.4;
   const wallT = 0.15;
@@ -117,7 +119,7 @@ function RoomShell({ name, active }: { name: string; active: boolean }) {
         position={[0, -0.45, half + 0.3]}
         rotation={[-Math.PI / 2, 0, 0]}
         fontSize={0.3}
-        color={palette.ink}
+        color={labelColor}
         anchorX="center"
         anchorY="middle"
       >
@@ -131,6 +133,7 @@ function RoomShell({ name, active }: { name: string; active: boolean }) {
 
 // Floor shell: single horizontal slab, larger than a room.
 function FloorShell({ name, active }: { name: string; active: boolean }) {
+  const labelColor = useLabelColor();
   return (
     <group>
       <mesh position={[0, -0.5, 0]}>
@@ -142,7 +145,7 @@ function FloorShell({ name, active }: { name: string; active: boolean }) {
         position={[0, -0.29, 6.4]}
         rotation={[-Math.PI / 2, 0, 0]}
         fontSize={0.4}
-        color={palette.ink}
+        color={labelColor}
         anchorX="center"
         anchorY="middle"
       >
@@ -159,6 +162,7 @@ function FloorShell({ name, active }: { name: string; active: boolean }) {
 // real building rather than a transparent cube). The halo still breathes
 // around the rough tower volume when descendants are running.
 function BuildingShell({ name, active }: { name: string; active: boolean }) {
+  const labelColor = useLabelColor();
   return (
     <group>
       {/* Ground pad */}
@@ -171,7 +175,7 @@ function BuildingShell({ name, active }: { name: string; active: boolean }) {
         position={[0, -0.59, 5.6]}
         rotation={[-Math.PI / 2, 0, 0]}
         fontSize={0.45}
-        color={palette.ink}
+        color={labelColor}
         anchorX="center"
         anchorY="middle"
       >
@@ -182,30 +186,12 @@ function BuildingShell({ name, active }: { name: string; active: boolean }) {
   );
 }
 
-// Campus shell: large flat ground plane.
-function CampusShell({ name, active }: { name: string; active: boolean }) {
-  return (
-    <group>
-      <mesh position={[0, -0.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[40, 40]} />
-        <grassMaterial
-          colorA={new Color(palette.grassLight)}
-          colorB={new Color(palette.grassDark)}
-        />
-      </mesh>
-      <Text
-        position={[0, -0.49, 18]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        fontSize={0.9}
-        color={palette.ink}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {name}
-      </Text>
-      <GlowHalo size={[40.5, 0.5, 40.5]} position={[0, -0.5, 0]} active={active} />
-    </group>
-  );
+// Campus shell: Phase S2 — the ground is now a <HexIsland> mounted by
+// CampusView directly; this shell is a no-op. The campus name is rendered
+// via the HTML breadcrumb overlay (CampusOverlay), not in 3D.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function CampusShell(_: { name: string; active: boolean }) {
+  return null;
 }
 
 /**

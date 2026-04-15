@@ -1,13 +1,14 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
 import type { Agent, Issue, IssueComment } from "@paperclipai/shared";
 import { Link } from "@/lib/router";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { agentsApi } from "../../../api/agents";
 import { issuesApi } from "../../../api/issues";
 import { queryKeys } from "../../../lib/queryKeys";
 import { createIssueDetailPath } from "../../../lib/issueDetailBreadcrumb";
-import { palette } from "../palette";
 
 interface IssueQuickLookProps {
   id: string;
@@ -19,10 +20,8 @@ interface IssueQuickLookProps {
  * IssueQuickLook — slim read-only view of a single issue, rendered as the
  * drawer body when the user clicks an IssueRow in ContainerInspector.
  *
- * Shows: title, status/priority badges, assignee name, parent-lineage chain
- * (if any), and latest ≤3 comments truncated to ~200 chars each. A back
- * arrow restores the layer-overview drawer; an "Open in full →" link drops
- * the user into the full IssueDetail page.
+ * Phase U: restyled to match Paperclip's dark surface tokens. Comments use
+ * bg-muted/40 cards instead of cream, status/priority use real shadcn Badge.
  */
 export function IssueQuickLook({ id, companyId, onBack }: IssueQuickLookProps) {
   const issueQuery = useQuery({
@@ -48,23 +47,18 @@ export function IssueQuickLook({ id, companyId, onBack }: IssueQuickLookProps) {
   return (
     <div className="flex h-full flex-col">
       {/* Back bar */}
-      <div
-        className="flex items-center gap-2 border-b px-3 py-2"
-        style={{ borderColor: `${palette.ink}33` }}
-      >
-        <button
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={onBack}
           aria-label="Back to container overview"
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs"
-          style={{ color: palette.ink, backgroundColor: `${palette.ink}10` }}
         >
           <ArrowLeft size={12} />
           Back
-        </button>
-        <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide"
-          style={{ color: palette.deepBlue }}
-        >
+        </Button>
+        <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Issue
         </span>
       </div>
@@ -109,8 +103,6 @@ function IssueBody({
     : issue.assigneeUserId
       ? "user"
       : "unassigned";
-  // Lineage is derived from issue.ancestors if the server supplied it;
-  // otherwise we just show the immediate parent id so the chain is visible.
   type LineageEntry = { id: string; title: string | null; identifier: string | null };
   const lineage: LineageEntry[] = issue.ancestors && issue.ancestors.length > 0
     ? issue.ancestors.map((a) => ({ id: a.id, title: a.title, identifier: a.identifier }))
@@ -121,24 +113,24 @@ function IssueBody({
   const identifier = issue.identifier ?? issue.id.slice(0, 8);
 
   return (
-    <div className="flex flex-col gap-3 px-3 py-3">
+    <div className="flex flex-col gap-3 px-4 py-4">
       <div>
-        <div className="font-mono text-[10px] uppercase tracking-wide"
-          style={{ color: `${palette.ink}88` }}
-        >
+        <div className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
           {identifier}
         </div>
-        <div className="mt-0.5 text-sm font-semibold leading-snug"
-          style={{ color: palette.ink }}
-        >
+        <div className="mt-1 text-sm font-semibold leading-snug text-foreground">
           {issue.title}
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <Badge label={issue.status} tone="status" />
-        <Badge label={issue.priority} tone="priority" />
-        <span className="text-[11px]" style={{ color: `${palette.ink}99` }}>
+        <Badge variant="secondary" className="font-mono text-[9px] uppercase tracking-wide">
+          {issue.status}
+        </Badge>
+        <Badge variant="outline" className="font-mono text-[9px] uppercase tracking-wide">
+          {issue.priority}
+        </Badge>
+        <span className="text-[11px] text-muted-foreground">
           → {assigneeName}
         </span>
       </div>
@@ -151,9 +143,9 @@ function IssueBody({
               const ancestorLabel =
                 ancestor.title || ancestor.identifier || ancestor.id.slice(0, 8);
               return (
-                <li key={ancestor.id}
-                  className="font-mono text-[10px]"
-                  style={{ color: `${palette.ink}aa` }}
+                <li
+                  key={ancestor.id}
+                  className="font-mono text-[10px] text-muted-foreground"
                 >
                   {"·".repeat(idx)}↳ {ancestorLabel}
                 </li>
@@ -166,11 +158,9 @@ function IssueBody({
       <section>
         <SectionLabel>Latest comments</SectionLabel>
         {commentsLoading ? (
-          <div className="text-[11px] italic" style={{ color: `${palette.ink}88` }}>
-            loading…
-          </div>
+          <div className="text-[11px] italic text-muted-foreground">loading…</div>
         ) : comments.length === 0 ? (
-          <div className="text-[11px] italic" style={{ color: `${palette.ink}88` }}>
+          <div className="text-[11px] italic text-muted-foreground">
             No comments yet.
           </div>
         ) : (
@@ -184,16 +174,9 @@ function IssueBody({
               return (
                 <li
                   key={c.id}
-                  className="rounded border p-1.5 text-[11px]"
-                  style={{
-                    borderColor: `${palette.ink}22`,
-                    backgroundColor: `${palette.bone}aa`,
-                    color: palette.ink,
-                  }}
+                  className="rounded-md border border-border bg-muted/40 p-2 text-[11px] text-foreground"
                 >
-                  <div className="mb-0.5 font-mono text-[9px] uppercase tracking-wide"
-                    style={{ color: `${palette.ink}77` }}
-                  >
+                  <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
                     {author}
                   </div>
                   <div className="whitespace-pre-wrap leading-snug">
@@ -209,40 +192,20 @@ function IssueBody({
       <Link
         to={createIssueDetailPath(issue.identifier ?? issue.id)}
         disableIssueQuicklook
-        className="inline-flex items-center gap-1 self-start rounded border px-2 py-1 text-[11px] font-medium no-underline"
-        style={{
-          borderColor: palette.ink,
-          backgroundColor: palette.cream,
-          color: palette.ink,
-        }}
+        className="self-start no-underline"
       >
-        Open in full
-        <ExternalLink size={11} />
+        <Button type="button" variant="outline" size="xs">
+          Open in full
+          <ExternalLink size={11} />
+        </Button>
       </Link>
     </div>
   );
 }
 
-function Badge({ label, tone }: { label: string; tone: "status" | "priority" }) {
-  return (
-    <span
-      className="rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide"
-      style={{
-        backgroundColor: tone === "status" ? `${palette.deepBlue}22` : `${palette.terracotta}22`,
-        color: tone === "status" ? palette.deepBlue : palette.terracotta,
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className="pb-1 text-[10px] font-semibold uppercase tracking-wide"
-      style={{ color: palette.deepBlue }}
-    >
+    <div className="pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
       {children}
     </div>
   );
@@ -250,17 +213,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function LoadingBody() {
   return (
-    <div
-      className="flex items-center gap-2 px-3 py-3 text-xs"
-      style={{ color: `${palette.ink}99` }}
-    >
-      <span
-        aria-hidden
-        className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-t-transparent"
-        style={{
-          borderColor: `${palette.deepBlue} transparent ${palette.deepBlue} ${palette.deepBlue}`,
-        }}
-      />
+    <div className="flex items-center gap-2 px-4 py-4 text-xs text-muted-foreground">
+      <Loader2 size={12} className="animate-spin" />
       loading issue…
     </div>
   );
@@ -268,9 +222,7 @@ function LoadingBody() {
 
 function ErrorBody({ message }: { message: string }) {
   return (
-    <div className="px-3 py-3 text-xs" style={{ color: palette.clay }}>
-      {message}
-    </div>
+    <div className="px-4 py-4 text-xs text-destructive">{message}</div>
   );
 }
 
