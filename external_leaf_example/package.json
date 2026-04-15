@@ -1,0 +1,21 @@
+{
+  "name": "external-leaf-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reference Zootropolis leaf-agent daemon. Copy this folder onto any host to run a remote worker that Paperclip can dial over WebSocket.",
+  "scripts": {
+    "start": "node daemon.mjs",
+    "sync-skill": "mkdir -p .claude/skills/zootropolis-paperclip && cp ../paperclip-master/packages/agent-runtime/src/skills/zootropolis-paperclip.md .claude/skills/zootropolis-paperclip/SKILL.md"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "zootropolis": {
+    "port": 7100,
+    "agentId": "",
+    "companyId": "",
+    "paperclipApiUrl": "http://localhost:3100",
+    "paperclipApiKey": ""
+  }
+}

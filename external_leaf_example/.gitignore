@@ -1,0 +1,14 @@
+# macOS metadata
+.DS_Store
+
+# Per-run daemon log (created by daemon.mjs on each start)
+runtime.log
+
+# Claude CLI session cache — per-host, shouldn't be committed
+.claude/sessions/
+
+# Agent scratch — created on first run, not durable
+workspace/
+
+# Node deps (keep package-lock.json for reproducibility)
+node_modules/
