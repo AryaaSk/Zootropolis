@@ -19,6 +19,16 @@ if [ -f "${REPO_ROOT}/zootropolis.config.json" ]; then
   fi
 fi
 
+# Sync the repo's Paperclip skill to the home install so claude_local
+# container agents always see the latest version. Without this, the
+# home-installed skill goes stale and containers read outdated rules.
+SKILL_SRC="${REPO_ROOT}/paperclip-master/skills/paperclip/SKILL.md"
+SKILL_DST="${HOME}/.claude/skills/paperclip/SKILL.md"
+if [ -f "${SKILL_SRC}" ]; then
+  mkdir -p "$(dirname "${SKILL_DST}")"
+  cp "${SKILL_SRC}" "${SKILL_DST}"
+fi
+
 cd "${REPO_ROOT}/paperclip-master"
 
 # Start the server (API + DB) in the background; UI in the foreground so

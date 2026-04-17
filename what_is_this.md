@@ -124,7 +124,7 @@ A leaf agent is just any process that:
 3. Performs the work (reads files, writes code, fetches the web, whatever).
 4. Emits the standard Paperclip close marker on stdout when done.
 
-The full WebSocket protocol is documented in `docs/agent-runtime-contract.md`. The bundled implementation we use most is the `aliaskit_vm` adapter (Phase L+) which handles identity provisioning + a small worker harness on top of Claude Code.
+The full WebSocket protocol is documented in `docs/agent-runtime-contract.md`. The repo includes a reference daemon at `external_leaf_example/` — a single-file Node process + `ws` dependency that you copy onto any machine to create a worker.
 
 ### Why external-only
 
@@ -140,7 +140,53 @@ The runtime config for each leaf is just its `runtimeEndpoint` (the WebSocket UR
 
 ---
 
-## 5. The unifying idea: issues as messages
+## 5. What we added: company-wide Git policy
+
+Agents produce code. Code goes on GitHub. The Git policy defines how
+branches, PRs, merges, and conflicts flow through the org — mirroring
+how a real engineering company operates.
+
+### The flow
+
+1. **Leaf creates a PR.** Not just a branch push — a full GitHub PR
+   with description, linked to the issue. Branch naming:
+   `<github-username>/<issue-identifier>`.
+2. **Room merges clean PRs.** The room agent (direct parent of leaves)
+   checks each PR during synthesis. Clean + green CI → `gh pr merge
+   --squash`. This is an administrative action (one API call), not
+   code work.
+3. **Conflicts go back to the author.** If a PR has merge conflicts,
+   the room creates a new sub-issue for the original leaf: "rebase
+   onto main." The leaf resolves because it wrote the code and knows
+   it best.
+4. **Higher containers just propagate references.** Floors, buildings,
+   and campus never touch Git. Their synthesis artifacts collect and
+   forward PR URLs from the layers below.
+
+### Why rooms merge (not a dedicated merge agent)
+
+A dedicated merge-leaf would need to run AFTER all coding-leaves
+finish — a timing problem. The room already has that timing built in:
+its synthesis step only fires after every sub-issue closes. So the
+merge is a natural extension of synthesis, not a separate role.
+
+Rooms clicking "merge" is the same thing real engineering leads do —
+they don't write the code, they approve and merge the PR. The "no
+work" rule still holds: merging a clean PR creates no new content.
+
+### Leaf identity is unknown upfront
+
+Each leaf VM has its own GitHub account — like a freelancer bringing
+their own laptop. The company doesn't know the username until the leaf
+introduces itself (posts a comment on its first code task with its
+GitHub handle). After that, the username flows through close artifacts
+and the room can reference it.
+
+Full policy: `GIT_POLICY.md` in the repo root.
+
+---
+
+## 6. The unifying idea: issues as messages
 
 All three additions above only make sense if you reframe what an "issue" *is*.
 
@@ -158,7 +204,34 @@ So Zootropolis is best described as: **a distributed organisation simulator buil
 
 ---
 
-## 6. Where things live (cheat sheet)
+## 7. Quickstart
+
+```bash
+# 1. Clone
+git clone https://github.com/AryaaSk/Zootropolis.git
+cd Zootropolis
+
+# 2. Install
+cd paperclip-master && pnpm install && cd ..
+
+# 3. Boot (server :3100 + UI :5173, embedded Postgres, skill sync)
+./scripts/dev.sh
+
+# 4. Open the UI, create a company, build your org
+open http://localhost:5173
+```
+
+Then:
+- Hire leaf agents by pointing at pre-existing VM daemons (`ws://<host>:<port>/`).
+- Build the hierarchy bottom-up: wrap leaves in rooms → rooms in floors → floors in buildings.
+- Assign an issue to a building and watch decomposition cascade down to the leaves.
+
+For setting up leaf VMs: see `EXTERNAL_LEAF_AGENTS.md`.
+For the reference daemon to copy onto VMs: see `external_leaf_example/`.
+
+---
+
+## 8. Where things live (cheat sheet)
 
 | Concept | Location |
 |---|---|
@@ -172,13 +245,16 @@ So Zootropolis is best described as: **a distributed organisation simulator buil
 | Container close-marker gate | `paperclip-master/server/src/services/heartbeat.ts` (Phase R/S close-gate logic) |
 | Container `AGENTS.md` template | `paperclip-master/server/src/onboarding-assets/zootropolis-container/AGENTS.md` |
 | External-leaf WebSocket contract | `docs/agent-runtime-contract.md` |
-| External worker / WebSocket daemon | `docs/external-daemon-quickstart.md` + `aliaskit_vm` adapter (name historical; adapter is now just "connect-to-external-WebSocket") |
-| Worker-side AliasKit identity (skill, not server) | Lives on the VM running each leaf daemon; not bundled or provisioned by the server |
+| Reference leaf daemon (copy to VMs) | `external_leaf_example/` |
+| Leaf setup guide | `EXTERNAL_LEAF_AGENTS.md` |
+| Git policy | `GIT_POLICY.md` |
+| Leaf skill (protocol + git workflow) | `paperclip-master/packages/agent-runtime/src/skills/zootropolis-paperclip.md` (synced to each daemon's `.claude/skills/`) |
+| Paperclip skill (API spec, synced to `~/.claude/` by dev.sh) | `paperclip-master/skills/paperclip/SKILL.md` |
 | Zootropolis-specific runtime knobs | `zootropolis.config.json` (currently: `delegation.strict`) |
-| Dev wrapper | `scripts/dev.sh` (boots server :3100 + UI :5173, points `PAPERCLIP_HOME` at the in-repo `.paperclip/`) |
+| Dev wrapper | `scripts/dev.sh` (boots server + UI, syncs skills, loads config) |
 
 ---
 
-## 7. Mental model in one paragraph
+## 9. Mental model in one paragraph
 
 > **Zootropolis is a forked Paperclip where every agent is a tiny LLM worker running anywhere on the internet, where managers can't do work — they can only split it into smaller pieces and pass it down — and where the resulting org chart is rendered as a 3D city you can fly through. The whole thing runs on the premise that "an issue" is really "a message between two agents," and once you accept that, every other rule becomes obvious.**
