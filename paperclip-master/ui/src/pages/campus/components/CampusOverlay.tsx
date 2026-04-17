@@ -3,6 +3,7 @@ import { CampusBackButton } from "./CampusBackButton";
 import { Minimap } from "./Minimap";
 import { ExitCampusButton } from "./ExitCampusButton";
 import { HireAgentButton } from "./HireAgentButton";
+import { PauseCompanyButton } from "./PauseCompanyButton";
 import { TimeOfDaySlider } from "./TimeOfDaySlider";
 
 /**
@@ -21,6 +22,7 @@ export function CampusOverlay() {
       <Breadcrumb />
       <Minimap />
       <HireAgentButton />
+      <PauseCompanyButton />
       <TimeOfDaySlider />
     </>
   );

@@ -91,20 +91,23 @@ function pickRigForLocalHour(hour: number): TimeOfDayRig {
     };
   }
   if (hour >= 10 && hour < 16) {
+    // Calmer midday: the previous rig + NeutralToneMapping at
+    // exposure 1.15 blew whites out. Cut key/ambient/hemi roughly in
+    // half and pull environmentIntensity below 1.0.
     return {
       preset: "park",
       fogColor: "#e0ecf2",
       keyPosition: [6, 14, 6],
       keyColor: "#fff9e6",
-      keyIntensity: 2.8,
+      keyIntensity: 1.5,
       ambientColor: "#ffffff",
-      ambientIntensity: 0.45,
+      ambientIntensity: 0.28,
       hemiSky: "#d1e7f1",
       hemiGround: palette.sage,
-      hemiIntensity: 0.55,
+      hemiIntensity: 0.35,
       fillColor: "#d8e6f2",
-      fillIntensity: 0.25,
-      environmentIntensity: 1.1,
+      fillIntensity: 0.15,
+      environmentIntensity: 0.75,
     };
   }
   if (hour >= 16 && hour < 19) {
