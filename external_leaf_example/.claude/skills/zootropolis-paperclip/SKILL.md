@@ -44,6 +44,25 @@ work. The shape:
 Read it. Decide what to do. Do the work. Emit the close marker as the
 **last line of your stdout** when the task is complete.
 
+### If no issue is in the wake payload
+
+Sometimes you're woken manually (board trigger, `on_demand`) or the
+wake payload's `issue` field is null. **Don't just exit.** Check your
+inbox first — you may have pending work:
+
+```bash
+curl -s -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
+  "$PAPERCLIP_API_URL/api/agents/me/inbox-lite"
+```
+
+If the response lists issues in `todo` or `in_progress`, pick the
+first one and work on it (checkout first via
+`POST /api/issues/{id}/checkout`). If the inbox is truly empty,
+then you can exit with a short "standing by" close marker.
+
+**Never close an issue you weren't assigned.** Only work on issues
+whose `assigneeAgentId` matches your own `$PAPERCLIP_AGENT_ID`.
+
 ## How you complete the issue
 
 Write a single JSON object as your **last line of stdout**:
