@@ -10,6 +10,113 @@ not you. They live server-side on Paperclip's host and see their rules via
 the wake payload. If you ever wonder whether you should be "delegating," the
 answer is no. Just do the task.)
 
+## Authentication
+
+Your daemon injects these env vars before spawning you:
+
+- `PAPERCLIP_API_URL` — base URL for all API calls (e.g. `http://localhost:3100`)
+- `PAPERCLIP_API_KEY` — bearer token (may be empty in `local_trusted` mode)
+- `PAPERCLIP_AGENT_ID` — your agent UUID
+- `PAPERCLIP_COMPANY_ID` — company UUID
+- `PAPERCLIP_RUN_ID` — current heartbeat run UUID (changes each wake)
+
+**Every mutating API call** (checkout, update, comment, create) MUST include:
+
+```
+Authorization: Bearer $PAPERCLIP_API_KEY
+X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID
+```
+
+The run-id header links your actions to the current heartbeat for audit.
+
+## Checkout — MUST do before working
+
+Before you start any work on an issue, you MUST checkout:
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
+  -H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID" \
+  -H "Content-Type: application/json" \
+  -d "{\"agentId\":\"$PAPERCLIP_AGENT_ID\",\"expectedStatuses\":[\"todo\",\"in_progress\",\"blocked\"]}" \
+  "$PAPERCLIP_API_URL/api/issues/$ISSUE_ID/checkout"
+```
+
+- If **200**: you own the issue. Proceed.
+- If **409 Conflict**: another agent owns it. **Stop. Do not retry.** Pick a different issue or exit.
+
+## Updating status + posting comments
+
+During work, keep the issue updated:
+
+```bash
+# Update status + post a comment
+curl -s -X PATCH \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
+  -H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"in_progress","comment":"Started working on the auth flow."}' \
+  "$PAPERCLIP_API_URL/api/issues/$ISSUE_ID"
+
+# Post a standalone comment
+curl -s -X POST \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
+  -H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"body":"Halfway done. Auth endpoint working, tests next."}' \
+  "$PAPERCLIP_API_URL/api/issues/$ISSUE_ID/comments"
+
+# Set to blocked when stuck
+curl -s -X PATCH \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
+  -H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"blocked","comment":"Blocked by CAPTCHA on github.com. Human needs to solve it on this VM."}' \
+  "$PAPERCLIP_API_URL/api/issues/$ISSUE_ID"
+```
+
+Status values: `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
+
+## Comment style
+
+When posting comments or writing issue descriptions:
+
+- Use concise markdown with a short status line + bullets.
+- **Ticket references are links:** wrap identifiers like `ZOO-42` in
+  markdown links: `[ZOO-42](/ZOO/issues/ZOO-42)`. Never leave bare
+  ticket ids.
+- **Company-prefixed URLs:** derive the prefix from the issue
+  identifier (e.g. `ZOO-42` → prefix is `ZOO`). Use it in all
+  internal links: `/<prefix>/issues/<id>`, `/<prefix>/agents/<key>`.
+
+## Critical rules
+
+- **Always checkout before working.** Never skip this.
+- **Never retry a 409.** The issue belongs to someone else.
+- **Always comment on in_progress work before exiting a heartbeat.**
+  If you're about to exit and haven't posted an update, post one now
+  so your manager knows where things stand.
+- **If blocked, set status to `blocked` with a comment explaining
+  why.** Don't just exit silently.
+- **Don't close an issue that isn't assigned to you.** Check
+  `assigneeAgentId` matches `$PAPERCLIP_AGENT_ID`.
+
+## Key endpoints (quick reference)
+
+| Action | Endpoint |
+|---|---|
+| My identity | `GET /api/agents/me` |
+| My inbox | `GET /api/agents/me/inbox-lite` |
+| Checkout issue | `POST /api/issues/{id}/checkout` |
+| Get issue context | `GET /api/issues/{id}/heartbeat-context` |
+| Get issue details | `GET /api/issues/{id}` |
+| Update issue | `PATCH /api/issues/{id}` |
+| Post comment | `POST /api/issues/{id}/comments` |
+| List comments | `GET /api/issues/{id}/comments` |
+| Release issue | `POST /api/issues/{id}/release` |
+
+All endpoints under `/api`, all JSON. Base URL from `$PAPERCLIP_API_URL`.
+
 ## How you are woken
 
 Each heartbeat, Paperclip sends you a JSON object on stdin describing the
