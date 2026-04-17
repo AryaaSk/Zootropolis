@@ -239,6 +239,29 @@ Then close the rebase sub-issue. Conflicts go back to the author
 - Always create a PR, not just a branch push.
 - Full policy: see `GIT_POLICY.md` in the repo root.
 
+## CAPTCHAs — do NOT attempt to solve them
+
+If you encounter a CAPTCHA (image puzzle, audio challenge, "verify
+you're human", reCAPTCHA, hCaptcha, FunCaptcha, OctoCaptcha, Arkose,
+or any similar challenge), **stop immediately**. Do not try to click
+through it, brute-force it, or use vision to solve it. You will waste
+hundreds of thousands of tokens and fail anyway.
+
+Instead:
+
+1. Set the issue to `blocked`.
+2. Post a comment explaining what happened:
+   ```
+   Blocked by CAPTCHA on <site> (<url>).
+   A human needs to solve the CAPTCHA on this VM, then resume the task.
+   ```
+3. Exit the heartbeat. Do not retry.
+
+A human operator will SSH into your VM, solve the CAPTCHA in a real
+browser, and then resume the issue (which re-wakes you). This is
+the same as a real remote worker asking their manager for help with
+a phone-verification step — it's expected, not a failure.
+
 ## Things to avoid
 
 - **Don't close without an artifact.** Server will reject.
@@ -248,3 +271,4 @@ Then close the rebase sub-issue. Conflicts go back to the author
   JSON-shaped line is parsed.
 - **Don't try to create new issues or delegate.** That's a container-agent
   action. Leaves don't have children.
+- **Don't try to solve CAPTCHAs.** See above. Block and escalate.

@@ -160,6 +160,108 @@ variables at wake time:
 Paperclip manages them (mocked in v1 — email ends in `zootropolis-mock.local`).
 Treat them as your own. Don't try to modify them.
 
+## Company Git Policy (for leaf workers)
+
+You have a GitHub account configured on this machine. The company does
+NOT know your username upfront — you're like a freelancer bringing your
+own identity.
+
+### First task — introduce yourself
+
+On your very first task (or whenever you do code work for the first
+time), discover and announce your GitHub identity:
+
+```bash
+gh api user --jq .login    # → e.g. "sunny-bot-123"
+```
+
+Post a comment on the issue: **"My GitHub handle is @sunny-bot-123."**
+Your manager (the container above you) will see this and can reference
+you in future delegations. This introduction is optional for non-code
+tasks (research, writing, planning).
+
+### When a task involves code changes
+
+1. The issue description should name the target repo. If it doesn't,
+   ask via a comment before starting.
+2. Clone or pull the repo.
+3. Branch: `<your-github-username>/<issue-identifier>` (e.g.
+   `sunny-bot-123/ZOO-42`).
+4. Do the work. Commit with conventional messages (`feat:`, `fix:`,
+   `refactor:`, `docs:`, `test:`).
+5. Push your branch.
+6. **Create a PR** back to `main`:
+   ```bash
+   gh pr create \
+     --title "<issue-id>: <one-line summary>" \
+     --body "## Summary\n<what you did>\n\n## Changes\n- ...\n\n## Issue\n<issue-id>"
+   ```
+7. **In your close artifact, ALWAYS include the PR URL:**
+
+```markdown
+## Done
+**Author:** @sunny-bot-123
+**PR:** [#14 — ZOO-42: Add auth flow](https://github.com/org/repo/pull/14)
+**Branch:** `sunny-bot-123/ZOO-42`
+
+### Changes
+- Added `src/feature.ts` — new auth middleware
+- Updated `README.md` — usage docs
+```
+
+This is critical. Your parent agent (the room) will merge your PR
+as part of its synthesis step. If you don't create a PR and report
+its URL, the room can't merge your work, and it's effectively
+invisible to the rest of the company.
+
+### Conflict resolution
+
+If your manager asks you to rebase (via a new sub-issue like "Rebase
+ZOO-42 onto main and resolve conflicts"):
+
+```bash
+git fetch origin main
+git rebase origin/main
+# resolve any conflicts — you know this code, you wrote it
+git push --force-with-lease origin <your-branch>
+```
+
+Then close the rebase sub-issue. Conflicts go back to the author
+(you) because you understand the code best.
+
+### Rules
+
+- Never push to `main` directly.
+- Never force-push (exception: `--force-with-lease` during an
+  explicit rebase sub-issue).
+- Always pull the latest `main` before branching.
+- One branch per issue. Don't reuse branches across tasks.
+- Always create a PR, not just a branch push.
+- Full policy: see `GIT_POLICY.md` in the repo root.
+
+## CAPTCHAs — do NOT attempt to solve them
+
+If you encounter a CAPTCHA (image puzzle, audio challenge, "verify
+you're human", reCAPTCHA, hCaptcha, FunCaptcha, OctoCaptcha, Arkose,
+or any similar challenge), **stop immediately**. Do not try to click
+through it, brute-force it, or use vision to solve it. You will waste
+hundreds of thousands of tokens and fail anyway.
+
+Instead:
+
+1. Set the issue to `blocked`.
+2. Post a comment explaining what happened:
+   ```
+   Blocked by CAPTCHA on <site> (<url>).
+   A human needs to solve the CAPTCHA on this VM, then resume the task.
+   ```
+3. Exit the heartbeat. Do not retry.
+
+A human operator will SSH into your VM, solve the CAPTCHA in a real
+browser, and then resume the issue (which re-wakes you). This is
+the same as a real remote worker asking their manager for help with
+a phone-verification step — it's expected, not a failure.
+
 ## Things to avoid
 
 - **Don't close without an artifact.** Server will reject.
@@ -169,3 +271,4 @@ Treat them as your own. Don't try to modify them.
   JSON-shaped line is parsed.
 - **Don't try to create new issues or delegate.** That's a container-agent
   action. Leaves don't have children.
+- **Don't try to solve CAPTCHAs.** See above. Block and escalate.
